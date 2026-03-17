@@ -24,3 +24,7 @@ witc summarize . --exclude-generated
 ```bash
 go install github.com/ai-suite/witc/cmd/witc@latest
 ```
+
+## Skills
+
+This repository includes a skill for specialized task assistance. See `skill/SKILL.md` for details on using the `witc` skill to generate summaries of Go projects.
