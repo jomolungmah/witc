@@ -1,0 +1,23 @@
+# Phase 2: Entry Point Detection - Task 5
+## Title: Identify main() as Primary Entry Point
+
+### Objective
+Detect and mark the main() function as the primary program entry point.
+
+### Requirements
+- Scan all packages for exported `func main()` functions
+- Mark found main() as root entry point with Depth = 0
+- Handle cases where main() is in different files within same package
+- Support multiple main() declarations (log warning, use first found)
+- Skip if no main() exists (library package detection)
+
+### Implementation Notes
+- Check function name == "main" and exported (capitalized)
+- Verify signature matches `func()` or `func(args ...)` patterns
+- Record file location for each main() found
+- Create entry point list for traversal initialization
+
+### Acceptance Criteria
+- Correctly identifies main() in standard Go programs
+- Logs warning when multiple mains detected
+- Gracefully handles library packages without main()

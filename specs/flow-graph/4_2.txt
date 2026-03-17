@@ -1,0 +1,23 @@
+# Phase 4: Output Formats - Task 14
+## Title: JSON Graph Data Structure for Analysis Tools
+
+### Objective
+Export call graph as structured JSON consumable by programmatic tools and visualization libraries.
+
+### Requirements
+- Root object with metadata (root_path, total_functions, entry_points)
+- Nodes array: each function as object with name, package, depth, file, line
+- Edges array: caller → callee relationships
+- Separate arrays for entryPoints, hotPaths, deadCode
+- Include statistics: max_depth, avg_depth, total_edges
+
+### Implementation Notes
+- Use camelCase for JSON field names (snake_case in Go)
+- Ensure deterministic ordering (sort by package, then name)
+- Validate JSON schema before output
+- Support --json flag to select this format
+
+### Acceptance Criteria
+- Valid JSON parseable by standard tools
+- All graph relationships preserved
+- Metadata includes useful statistics for analysis

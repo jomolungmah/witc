@@ -1,0 +1,23 @@
+# Phase 1: Call Graph Extraction - Task 4
+## Title: Handle Anonymous Functions and Closures
+
+### Objective
+Support tracking of anonymous functions (lambdas) and closure capture in call graphs.
+
+### Requirements
+- Detect `ast.FuncLit` nodes representing anonymous functions
+- Create synthetic node identifiers for closures (e.g., "pkg.anon@line:col")
+- Track captured variables via `ast.FieldList` in function literals
+- Record when anonymous function is called and what it calls
+- Handle nested anonymous functions with unique IDs
+
+### Implementation Notes
+- Use format: `{package}.anon.{file}:{line}` for closure identification
+- Store closure body calls separately from caller context
+- Don't try to resolve captured variables (out of scope)
+- Mark closures as special node type in graph
+
+### Acceptance Criteria
+- Anonymous functions appear as nodes in call graph
+- Calls to anonymous functions are tracked
+- No panics when encountering function literals

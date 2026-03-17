@@ -1,0 +1,23 @@
+# Phase 6: CLI Flags - Task 21
+## Title: Enable Call Graph Output with --flow Flag
+
+### Objective
+Add command-line flag to toggle call graph output generation.
+
+### Requirements
+- Add `--flow` or `-f` boolean flag (default: false, disabled)
+- When enabled: include call graph section in all outputs
+- When disabled: show only existing API surface summary
+- Add help text explaining what flow analysis does
+- Flag should be independent of --no-structure
+
+### Implementation Notes
+- Use cobra.Flags().BoolVar() for flag definition
+- Check flag value before invoking traversal algorithms
+- Respect both flags together (can have flow without structure)
+- Update README with new flag documentation
+
+### Acceptance Criteria
+- Default behavior unchanged (--flow not enabled by default)
+- Clear help text explains the feature
+- Flag works correctly with existing output formats

@@ -1,0 +1,24 @@
+# Phase 4: Output Formats - Task 13
+## Title: Markdown Call Tree with Indentation
+
+### Objective
+Generate human-readable markdown representation of call flow hierarchy.
+
+### Requirements
+- Use indentation (spaces/tabs) to show call depth levels
+- Format: function_name(depth_level) → called_functions(...)
+- Include package name prefix for clarity
+- Add visual indicators for entry points, hot paths, dead code
+- Group by package sections similar to current structure
+- Support --no-flow flag to disable this output
+
+### Implementation Notes
+- Use tree characters (├── └──) like existing file tree format
+- Indent based on Depth value from traversal
+- Add legend explaining symbols/indicators
+- Include depth count in summary header
+
+### Acceptance Criteria
+- Clear visual hierarchy showing call relationships
+- Entry points clearly marked at top level
+- Package groupings maintain logical organization

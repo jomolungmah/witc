@@ -1,0 +1,23 @@
+# Phase 5: Enhanced Data Structures - Task 18
+## Title: Define FunctionNode Struct with Metadata
+
+### Objective
+Create detailed node structure to represent each function in the call graph.
+
+### Requirements
+- Basic fields: Name, Package, File, Line (source location)
+- Call tracking: Calls []string, CalledBy []string
+- Traversal state: Depth int, Visited bool, Parent *FunctionNode
+- Classification: IsEntry, IsHotPath, IsDeadCode flags
+- Visibility: Public/Private indicator
+
+### Implementation Notes
+- Use pointers for slice fields to allow dynamic growth
+- Initialize with zero values (Depth=-1 indicates unvisited)
+- Provide convenience getters/setters for common operations
+- Include custom UnmarshalJSON for flexible input formats
+
+### Acceptance Criteria
+- All necessary metadata captured in node structure
+- Efficient memory usage with proper pointer semantics
+- Clear distinction between traversal state and data fields

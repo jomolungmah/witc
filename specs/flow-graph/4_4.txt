@@ -1,0 +1,23 @@
+# Phase 4: Output Formats - Task 16
+## Title: Add Flow-Depth Limit Flag Implementation
+
+### Objective
+Implement CLI flag to control maximum traversal depth in call graph output.
+
+### Requirements
+- Add `--max-depth` or `-d N` flag (default: unlimited, or 50)
+- Stop BFS traversal when Depth exceeds limit
+- Truncate edges leading beyond max depth
+- Update all node depths accordingly
+- Warn user if actual max depth exceeded
+
+### Implementation Notes
+- Parse integer argument for depth value
+- Modify BFS to check `currentDepth < maxDepth` before expanding
+- Record actual maximum depth reached in summary
+- Support 0 = unlimited (legacy behavior)
+
+### Acceptance Criteria
+- Flag correctly limits traversal depth
+- Output respects specified depth limit
+- Clear warning when truncation occurs

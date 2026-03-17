@@ -1,0 +1,23 @@
+# Phase 5: Enhanced Data Structures - Task 20
+## Title: Add Depth Tracking to Node Structure
+
+### Objective
+Integrate depth calculation into the traversal algorithm and store results in nodes.
+
+### Requirements
+- Add `Depth int` field to FunctionNode (default -1 for unvisited)
+- BFS algorithm sets Depth during queue processing
+- Entry points initialized with Depth = 0
+- Track minimum depth if multiple paths exist
+- Validate depth values are non-negative for visited nodes
+
+### Implementation Notes
+- Initialize all node depths to -1 in graph construction
+- During BFS: `child.Depth = parent.Depth + 1`
+- Handle special case for entry points (depth stays 0)
+- Provide method to get maxDepth across entire graph
+
+### Acceptance Criteria
+- All visited nodes have correct depth values
+- Entry points at Depth 0, their direct callees at Depth 1
+- Maximum depth accurately computed and reported

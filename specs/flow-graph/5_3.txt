@@ -1,0 +1,23 @@
+# Phase 5: Enhanced Data Structures - Task 19
+## Title: Create Edge Map for Caller-Callee Relationships
+
+### Objective
+Implement efficient bidirectional edge storage for call graph traversal and analysis.
+
+### Requirements
+- Forward edges map: callerName → set of callee names
+- Backward edges map: calleeName → set of caller names (reverse lookup)
+- Methods to add/remove/lookup edges efficiently
+- Deduplication logic to prevent duplicate entries
+- Statistics calculation support (out-degree, in-degree)
+
+### Implementation Notes
+- Use `map[string]map[string]struct{}` for O(1) edge lookups
+- Implement helper functions: HasEdge, AddEdge, RemoveEdge
+- Provide methods to get all callers/callees of a node
+- Handle cycle detection via visited set during traversal
+
+### Acceptance Criteria
+- Edge operations are O(1) or better
+- Forward and backward maps stay consistent
+- No duplicate edges in either direction

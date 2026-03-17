@@ -1,0 +1,23 @@
+# Phase 3: Flow Tracing & Summarization - Task 11
+## Title: Identify Frequently Called Hot Paths
+
+### Objective
+Detect and highlight functions that are called from many other functions (high connectivity).
+
+### Requirements
+- Count incoming call edges for each function node
+- Calculate "call frequency" = number of callers
+- Sort functions by descending call count
+- Mark top N most-called functions as "hot paths"
+- Optionally track which entry points lead to hot paths
+
+### Implementation Notes
+- Iterate through all nodes, increment caller count
+- Store in `hotPaths` slice sorted by count descending
+- Provide threshold flag: --top-n 10 or similar
+- Highlight in output with special formatting/indicator
+
+### Acceptance Criteria
+- Correctly counts callers for each function
+- Hot paths identified and ranked by frequency
+- Output clearly indicates which functions are "hot"

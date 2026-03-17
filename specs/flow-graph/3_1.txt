@@ -1,0 +1,23 @@
+# Phase 3: Flow Tracing & Summarization - Task 9
+## Title: Implement BFS Traversal from Entry Points
+
+### Objective
+Perform breadth-first search traversal starting from detected entry points to map call flow paths.
+
+### Requirements
+- Initialize queue with all entry point nodes (main, inits)
+- Track visited set to prevent cycles and redundant processing
+- For each node, add all outgoing edges (calls) to queue if unvisited
+- Record parent pointer for path reconstruction
+- Stop when queue empty or max depth reached
+
+### Implementation Notes
+- Use standard BFS algorithm with FIFO queue
+- Maintain `distance` map: node → distance from entry
+- Track `parent` map: node → parent node for backtracking paths
+- Handle cycles by checking visited before adding to queue
+
+### Acceptance Criteria
+- All reachable functions discovered via call chains
+- No infinite loops from circular dependencies
+- Correct depth calculation for all nodes

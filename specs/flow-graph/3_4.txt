@@ -1,0 +1,23 @@
+# Phase 3: Flow Tracing & Summarization - Task 12
+## Title: Detect Unreachable/Dead Code Functions
+
+### Objective
+Identify functions that cannot be reached from any entry point (potentially dead code).
+
+### Requirements
+- After traversal, find all nodes with Depth = -1 (unvisited)
+- Categorize as "dead code" or "separate component"
+- Record which package each unreachable function belongs to
+- Optionally track if unreachable functions call other unreachable functions
+- Provide flag to filter dead code from output
+
+### Implementation Notes
+- Compare traversed set against all discovered functions
+- Group unreachable by package for better context
+- Consider marking as warning, not error (may be valid patterns)
+- Log count of dead functions in summary header
+
+### Acceptance Criteria
+- All unreachable functions identified post-traversal
+- Dead code clearly distinguished from reachable code
+- Optional filtering via command-line flag

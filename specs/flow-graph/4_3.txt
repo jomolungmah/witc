@@ -1,0 +1,23 @@
+# Phase 4: Output Formats - Task 15
+## Title: DOT/Graphviz Visual Export Format
+
+### Objective
+Generate Graphviz DOT file for call graph visualization with node styling.
+
+### Requirements
+- Output valid DOT language syntax (digraph format)
+- Node attributes: label, shape, color based on type/status
+- Edge styling: direction, style, penwidth for hot paths
+- Legend definitions in comments or subgraph
+- Handle large graphs with compound nodes per package
+
+### Implementation Notes
+- Use `digraph { ... }` syntax compatible with Graphviz
+- Color coding: green=entry, yellow=hot, red=dead, blue=normal
+- Add node shape: box for functions, diamond for entry points
+- Include file location in tooltip or label
+
+### Acceptance Criteria
+- Valid DOT syntax parseable by graphviz tools
+- Visual differentiation of function types/statuses
+- Clear package grouping via subgraphs

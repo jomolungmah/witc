@@ -1,0 +1,23 @@
+# Phase 6: CLI Flags - Task 22
+## Title: Support Custom Entry Point Specification
+
+### Objective
+Allow users to specify a particular function as the starting point for flow analysis.
+
+### Requirements
+- Add `--entry-point <func>` or `-e <func>` flag (string)
+- Accept format: "package.Func" or just "Func" for same package
+- Validate that specified entry point exists in codebase
+- Override auto-detected entry points when provided
+- Support multiple entry points via comma-separated list
+
+### Implementation Notes
+- Parse function name and resolve to actual definition
+- Clear existing EntryPoints, replace with user-specified ones
+- Log warning if entry point not found
+- Validate before starting traversal
+
+### Acceptance Criteria
+- Custom entry point correctly identified and used as root
+- Invalid entry points produce clear error message
+- Works with all output formats

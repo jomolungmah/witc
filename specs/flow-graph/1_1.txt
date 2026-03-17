@@ -1,0 +1,23 @@
+# Phase 1: Call Graph Extraction - Task 1
+## Title: Implement Call Expression AST Visitor Pattern
+
+### Objective
+Create a visitor pattern implementation to traverse Go AST nodes and identify function calls.
+
+### Requirements
+- Create `CallVisitor` struct that implements `ast.Visitor` interface
+- Override `Visit(*ast.CallExpr)` method to detect all call expressions
+- Track call targets: extract the function being called (selector, ident, or basiclit)
+- Record source location (file path, line number, column) for each call
+- Preserve original AST context for accurate resolution
+
+### Implementation Notes
+- Use `go/ast` package from standard library
+- Store results in map: `map[string][]CallInfo` keyed by called function name
+- CallInfo struct should contain: callerName, calleeName, file, line, column
+- Handle all call expression types: func calls, method calls, selector calls
+
+### Acceptance Criteria
+- Successfully identifies all direct function calls in sample code
+- Preserves accurate source location information
+- Handles nested calls without duplication

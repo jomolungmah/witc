@@ -1,0 +1,27 @@
+# Phase 1: Call Graph Extraction - Task 2
+## Title: Build Directed Graph Data Structure
+
+### Objective
+Implement data structures to represent the call graph as a directed graph with nodes and edges.
+
+### Requirements
+- Create `CallGraph` struct containing:
+  - Nodes map: function name → FunctionNode
+  - Edges map: caller name → set of callee names
+  - EntryPoints list: starting functions for traversal
+- Define `FunctionNode` struct with fields:
+  - Name, Package, File, Line (basic metadata)
+  - Calls []string: direct callees from this function
+  - CalledBy []string: reverse lookup (who calls this)
+  - Depth int: distance from entry point (initialized to -1)
+- Ensure thread-safe access patterns for concurrent processing
+
+### Implementation Notes
+- Use `map[string]struct{}` for edges to avoid duplicate entries
+- Initialize all nodes with Depth = -1 (unvisited state)
+- Keep separate maps for caller→callee and callee←caller relationships
+
+### Acceptance Criteria
+- Graph structure correctly represents function call relationships
+- All functions appear as nodes in the graph
+- Edge directions are consistent (caller → callee)

@@ -1,0 +1,23 @@
+# Phase 6: CLI Flags - Task 23
+## Title: Implement Max-Depth Traversal Limit
+
+### Objective
+Add flag to control how deep the call graph traversal goes.
+
+### Requirements
+- Add `--max-depth` or `-d N` integer flag (default: 50, unlimited if 0)
+- BFS stops expanding when current depth reaches limit
+- Warn user if actual max depth would exceed limit
+- Support 0 as "unlimited" for backward compatibility
+- Display truncated message in output header
+
+### Implementation Notes
+- Parse int argument, validate >= 0
+- Modify BFS to check `depth < maxDepth` before expanding
+- Track actual maximum depth reached
+- Include truncation notice in summary if limit applied
+
+### Acceptance Criteria
+- Flag correctly limits traversal without crashing
+- Default value (50) provides reasonable protection
+- Clear indication when output is truncated

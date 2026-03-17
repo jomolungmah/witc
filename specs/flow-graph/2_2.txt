@@ -1,0 +1,23 @@
+# Phase 2: Entry Point Detection - Task 6
+## Title: Detect init() Functions for Package Initialization
+
+### Objective
+Identify and track init() functions that run before main().
+
+### Requirements
+- Find all exported `func init()` functions across packages
+- Record init() execution order (file-based, but approximate)
+- Mark init() nodes with special "pre-main" flag
+- Track dependencies: does this init() call other package inits?
+- Add to entry point list for traversal
+
+### Implementation Notes
+- Look for function name == "init" and exported
+- Store all inits as potential entry points
+- In traversal, process inits before main functions
+- Handle multiple inits per package (execute in discovery order)
+
+### Acceptance Criteria
+- All init() functions detected and marked
+- Inits appear at Depth = -1 or special "pre-entry" level
+- Traversal respects init → main execution order

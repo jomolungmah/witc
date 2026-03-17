@@ -1,0 +1,24 @@
+# Phase 3: Flow Tracing & Summarization - Task 10
+## Title: Calculate Call Chain Depths
+
+### Objective
+Compute the depth (distance from entry) for each function in the call graph.
+
+### Requirements
+- Entry points have Depth = 0
+- Direct callees of entry points have Depth = 1
+- Each subsequent level increments depth by 1
+- Handle multiple paths: use minimum depth if reachable via different routes
+- Mark unreachable functions with special indicator (Depth = -1)
+- Support configurable maximum depth limit
+
+### Implementation Notes
+- BFS naturally computes shortest path distances in unweighted graphs
+- Store depth in FunctionNode.Depth field during traversal
+- Provide --max-depth flag to prune deep call chains
+- Log warnings for very deep chains (>50 levels)
+
+### Acceptance Criteria
+- Entry point at Depth 0
+- Correct incremental depth calculation along all paths
+- Unreachable functions clearly marked

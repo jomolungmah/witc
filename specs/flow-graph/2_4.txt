@@ -1,0 +1,24 @@
+# Phase 2: Entry Point Detection - Task 8
+## Title: Distinguish Exported vs Unexported Entry Points
+
+### Objective
+Categorize entry points by visibility and determine which should be included in output.
+
+### Requirements
+- Classify all detected functions as exported (capitalized) or unexported (lowercase)
+- Default to showing only exported functions in public API summary
+- Provide flag to include unexported/internal functions
+- Mark internal-only entry points with visibility indicator
+- Handle mixed-visibility packages correctly
+
+### Implementation Notes
+- Check first character of function name for capitalization
+- Respect Go naming conventions: exported = visible externally
+- Add `Visibility` field to FunctionNode (public, private, internal)
+- Default behavior: show public API only
+- Flag `--include-private` to expand visibility
+
+### Acceptance Criteria
+- Correct classification of all functions by visibility
+- Default output shows only exported symbols
+- Private entry points properly marked but excluded by default

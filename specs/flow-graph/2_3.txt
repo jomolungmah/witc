@@ -1,0 +1,23 @@
+# Phase 2: Entry Point Detection - Task 7
+## Title: Track Test Function Patterns (Test*)
+
+### Objective
+Identify and categorize test functions that may serve as entry points for testing execution.
+
+### Requirements
+- Detect all exported functions matching pattern `Test*` or `Benchmark*` or `Fuzz*`
+- Group by function name prefix categories
+- Record file location and signature for each test function
+- Optionally flag tests that call other package functions
+- Support custom test patterns via configuration
+
+### Implementation Notes
+- Use regexp or string prefix matching: ^Test, ^Benchmark, ^Fuzz
+- Store in separate category from main/entry points
+- Track which packages have tests (coverage reporting)
+- Consider adding --include-tests flag to traverse test code
+
+### Acceptance Criteria
+- All Test* functions detected and categorized
+- Separate tracking from application entry points
+- No impact on normal flow analysis unless explicitly enabled

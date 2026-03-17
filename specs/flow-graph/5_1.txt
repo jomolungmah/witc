@@ -1,0 +1,23 @@
+# Phase 5: Enhanced Data Structures - Task 17
+## Title: Define CallGraph Struct Type
+
+### Objective
+Create primary data structure to hold complete call graph information.
+
+### Requirements
+- Struct fields: Nodes map, Edges map, EntryPoints list
+- Statistics tracking: totalNodes, totalEdges, maxDepth, avgDepth
+- Metadata: rootPath, scanTime, fileCount
+- Methods for common operations (AddNode, AddEdge, GetEntryPoints)
+- Validation method to ensure graph integrity
+
+### Implementation Notes
+- Use map[string]*FunctionNode for nodes indexed by name
+- Use map[string]map[string]bool for edges (caller → set of callees)
+- Provide methods for traversal, validation, and statistics calculation
+- Implement JSON marshal/unmarshal support
+
+### Acceptance Criteria
+- Struct correctly represents complete call graph
+- All required fields initialized properly
+- Methods work efficiently without redundant computation

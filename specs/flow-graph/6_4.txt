@@ -1,0 +1,23 @@
+# Phase 6: CLI Flags - Task 24
+## Title: Display Call Frequency Statistics
+
+### Objective
+Show summary statistics about function call frequencies in the output.
+
+### Requirements
+- Add `--call-stats` or `-s` flag to enable statistics display
+- Calculate and display: total functions, edges, entry points
+- Show hot path count (functions called by N+ others)
+- Report max depth, average depth from entry points
+- Include unreachable/dead code count if present
+
+### Implementation Notes
+- Compute statistics after traversal completes
+- Format as compact summary block in output header
+- Update JSON format to include stats object
+- Consider progress bar during computation for large graphs
+
+### Acceptance Criteria
+- Statistics accurate and computed efficiently
+- Default behavior (no flag) shows minimal stats
+- Detailed stats available when explicitly requested

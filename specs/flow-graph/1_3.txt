@@ -1,0 +1,23 @@
+# Phase 1: Call Graph Extraction - Task 3
+## Title: Resolve Function Names Across Packages
+
+### Objective
+Implement name resolution logic to map call targets to actual function definitions within the codebase.
+
+### Requirements
+- Build index mapping qualified names (pkg.Func) → definition locations
+- Handle unqualified calls by searching current and imported packages
+- Support dot notation calls (pkg.Func) and bare identifier calls (Func)
+- Resolve method receivers: track receiver type for method calls
+- Handle shadowing: prefer closer package scope
+
+### Implementation Notes
+- Parse all source files first to build symbol table
+- Use AST ImportSpecs to track package imports
+- For each call, search: current package → imported packages (alphabetical)
+- Store resolution results in cache to avoid repeated lookups
+
+### Acceptance Criteria
+- Correctly resolves `fmt.Println` to main package's fmt.Println
+- Handles same-name functions in different packages without confusion
+- Logs unresolved calls for debugging
