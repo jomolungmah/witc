@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ai-suite/witc/internal/processor"
 	goparser "github.com/ai-suite/witc/internal/processor/go"
 )
 
@@ -16,23 +15,15 @@ func stripFuncKeyword(sig string) string {
 	return strings.TrimPrefix(sig, "func")
 }
 
-// writeCalls renders the outgoing calls of a single function, indented under it.
-func writeCalls(b *strings.Builder, calls []processor.CallInfo, indent string) {
-	if len(calls) == 0 {
+// writeTypedCalls renders a function's internal callees inline, looked up in the
+// type-checked graph by its qualified name (e.g. "pkg.Fn" or "pkg.(*T).M").
+// It renders nothing when the name isn't a node (e.g. under the AST fallback).
+func writeTypedCalls(b *strings.Builder, cg *goparser.CallGraph, qualified, indent string) {
+	info := cg.GetFunction(qualified)
+	if info == nil || len(info.Callees) == 0 {
 		return
 	}
-	sorted := append([]processor.CallInfo(nil), calls...)
-	sort.Slice(sorted, func(i, j int) bool {
-		if sorted[i].Line != sorted[j].Line {
-			return sorted[i].Line < sorted[j].Line
-		}
-		return sorted[i].CalleeName < sorted[j].CalleeName
-	})
-	b.WriteString(indent + "Calls:\n")
-	for _, call := range sorted {
-		loc := fmt.Sprintf("%s:%d", filepath.Base(call.File), call.Line)
-		b.WriteString(fmt.Sprintf("%s  - `%s` (at %s)\n", indent, call.CalleeName, loc))
-	}
+	b.WriteString(indent + "Calls: " + joinCode(uniqueCalleeNames(info)) + "\n")
 }
 
 // Markdown formats the summary as markdown.
@@ -63,9 +54,6 @@ func Markdown(sum *Summary) (string, error) {
 		}
 		b.WriteString(fmt.Sprintf("### %s\n\n", pkg))
 
-		// outgoing maps each function/method in this package to the calls it makes.
-		outgoing := outgoingCalls(r.CallGraph)
-
 		for _, s := range r.Structs {
 			// Struct with fields summary
 			if len(s.Fields) > 0 {
@@ -83,7 +71,8 @@ func Markdown(sum *Summary) (string, error) {
 			}
 			for _, m := range s.Methods {
 				b.WriteString(fmt.Sprintf("  - `func (%s) %s%s`\n", m.Receiver, m.Name, stripFuncKeyword(m.Signature)))
-				writeCalls(&b, outgoing[m.Name], "    ")
+				qualified := r.Package + ".(" + m.Receiver + ")." + m.Name
+				writeTypedCalls(&b, sum.CallGraph, qualified, "    ")
 			}
 		}
 
@@ -112,7 +101,7 @@ func Markdown(sum *Summary) (string, error) {
 			}
 			b.WriteString(fmt.Sprintf("- `%s`\n", sig))
 
-			writeCalls(&b, outgoing[fn.Name], "  ")
+			writeTypedCalls(&b, sum.CallGraph, r.Package+"."+fn.Name, "  ")
 		}
 
 		b.WriteString("\n")
@@ -149,7 +138,7 @@ func Markdown(sum *Summary) (string, error) {
 		}
 
 		b.WriteString("\n### Entry Points\n\n")
-		entryPoints := findEntryPoints(sum.CallGraph)
+		entryPoints := entryPointNames(sum.CallGraph)
 		if len(entryPoints) > 0 {
 			for _, ep := range entryPoints {
 				b.WriteString(fmt.Sprintf("- `%s`\n", ep))
@@ -218,32 +207,27 @@ func Markdown(sum *Summary) (string, error) {
 		b.WriteString("*No call graph data available*\n")
 	}
 
-	b.WriteString(GenerateCallSummary(sum.Packages, sum.CallGraph))
-	b.WriteString(GenerateDependencyMap(sum.Packages))
+	b.WriteString(GenerateCallSummary(sum.CallGraph))
+	b.WriteString(GenerateDependencyMap(sum.CallGraph))
 
-	for _, pkg := range sum.Packages {
-		if pkg != nil {
-			for _, fn := range pkg.Functions {
-				if fn.Name == "main" || isExported(fn.Name) {
-					b.WriteString(GenerateCallFlow(fn.Name, sum.Packages))
-				}
+	// Trace execution flow for a handful of entry points that actually drive
+	// calls, so the section stays useful without dumping every function.
+	if sum.CallGraph != nil {
+		const maxFlows = 6
+		count := 0
+		for _, ep := range entryPointNames(sum.CallGraph) {
+			info := sum.CallGraph.GetFunction(ep)
+			if info == nil || len(info.Callees) == 0 {
+				continue
+			}
+			b.WriteString(GenerateCallFlow(ep, sum.CallGraph))
+			if count++; count >= maxFlows {
+				break
 			}
 		}
 	}
 
 	return b.String(), nil
-}
-
-func findEntryPoints(cg *goparser.CallGraph) []string {
-	var entries []string
-	for funcName := range cg.Functions {
-		if isExported(funcName) || funcName == "main" {
-			entries = append(entries, funcName)
-		}
-	}
-	entries = deduplicateStrings(entries)
-	sort.Strings(entries)
-	return entries
 }
 
 func findLeafFunctions(cg *goparser.CallGraph) []string {

@@ -1,347 +1,204 @@
 package formatter
 
 import (
-	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
-	"github.com/ai-suite/witc/internal/processor"
+	goparser "github.com/ai-suite/witc/internal/processor/go"
 )
 
-// outgoingCalls inverts a callee-keyed call map (callee -> call sites, each
-// carrying ParentFunc = the calling function) into caller -> outgoing calls,
-// where each returned CallInfo has CalleeName set to the function being called.
-func outgoingCalls(cg map[string][]processor.CallInfo) map[string][]processor.CallInfo {
-	out := make(map[string][]processor.CallInfo)
-	for callee, sites := range cg {
-		for _, s := range sites {
-			caller := s.ParentFunc
-			if caller == "" {
-				continue
-			}
-			out[caller] = append(out[caller], processor.CallInfo{
-				CalleeName: callee,
-				File:       s.File,
-				Line:       s.Line,
-				Column:     s.Column,
-				ParentFunc: caller,
-			})
-		}
-	}
-	return out
-}
-
-// GenerateCallSummary creates a natural language summary of the call graph.
-func GenerateCallSummary(packages map[string]*processor.Result, cg interface{}) string {
+// GenerateCallSummary creates a natural-language summary of the call graph,
+// reading the type-checked graph so names, packages, and counts match the
+// "Call Graph" and "Metrics" sections.
+func GenerateCallSummary(cg *goparser.CallGraph) string {
 	var b strings.Builder
-
-	totalFuncs := 0
-	totalCalls := 0
-
-	// A function is called if it appears as a callee key with at least one
-	// call site. Entry points are functions nothing calls, plus main.
-	called := make(map[string]bool)
-	for _, pkg := range packages {
-		if pkg == nil {
-			continue
-		}
-		totalFuncs += len(pkg.Functions)
-		for callee, calls := range pkg.CallGraph {
-			totalCalls += len(calls)
-			if len(calls) > 0 {
-				called[callee] = true
-			}
-		}
-	}
-
-	var entryPoints []string
-	for _, pkg := range packages {
-		if pkg == nil {
-			continue
-		}
-		for _, fn := range pkg.Functions {
-			if fn.Name == "main" || !called[fn.Name] {
-				entryPoints = append(entryPoints, fn.Name)
-			}
-		}
-	}
-	entryPoints = deduplicateStrings(entryPoints)
-
 	b.WriteString("### Call Flow Summary\n\n")
 
-	if len(entryPoints) > 0 {
-		b.WriteString("The codebase has ")
-		b.WriteString(strconv.Itoa(totalFuncs))
-		b.WriteString(" functions with ")
-		b.WriteString(strconv.Itoa(totalCalls))
-		b.WriteString(" total calls. Entry points include: ")
-
-		for i, ep := range entryPoints {
-			if i > 0 {
-				b.WriteString(", ")
-			}
-			b.WriteString("`")
-			b.WriteString(ep)
-			b.WriteString("`")
-		}
-		b.WriteString(".\n\n")
-	} else {
-		b.WriteString("The codebase contains ")
-		b.WriteString(strconv.Itoa(totalFuncs))
-		b.WriteString(" functions with ")
-		b.WriteString(strconv.Itoa(totalCalls))
-		b.WriteString(" total calls.\n\n")
-	}
-
-	for pkgName, pkg := range packages {
-		if pkg == nil || len(pkg.Functions) == 0 {
-			continue
-		}
-
-		b.WriteString("**Package `")
-		b.WriteString(pkgName)
-		b.WriteString("`:**\n\n")
-
-		outgoing := outgoingCalls(pkg.CallGraph)
-		for _, fn := range pkg.Functions {
-			if calls := outgoing[fn.Name]; len(calls) > 0 {
-				b.WriteString(generateFunctionSummary(fn.Name, calls))
-			}
-		}
-
-		var pkgEntryPoints []string
-		for _, fn := range pkg.Functions {
-			if fn.Name == "main" || isExported(fn.Name) {
-				pkgEntryPoints = append(pkgEntryPoints, fn.Name)
-			}
-		}
-
-		if len(pkgEntryPoints) > 0 {
-			b.WriteString("\nKey entry points in this package: ")
-			for i, ep := range pkgEntryPoints {
-				if i > 0 {
-					b.WriteString(", ")
-				}
-				b.WriteString("`")
-				b.WriteString(ep)
-				b.WriteString("`")
-			}
-			b.WriteString(".\n\n")
-		} else {
-			b.WriteString("\n")
-		}
-	}
-
-	return b.String()
-}
-
-// generateFunctionSummary creates a natural language description of a function's call relationships.
-func generateFunctionSummary(funcName string, calls []processor.CallInfo) string {
-	var b strings.Builder
-
-	calleeSet := make(map[string]bool)
-	for _, call := range calls {
-		calleeSet[call.CalleeName] = true
-	}
-
-	numCallees := len(calleeSet)
-
-	b.WriteString("- `")
-	b.WriteString(funcName)
-	b.WriteString("` ")
-
-	if numCallees == 0 {
-		b.WriteString("is a leaf function (calls no other functions).\n\n")
+	if cg == nil || len(cg.Functions) == 0 {
+		b.WriteString("No call graph data available (0 functions).\n\n")
 		return b.String()
 	}
 
-	b.WriteString("calls ")
-	b.WriteString(strconv.Itoa(numCallees))
-	b.WriteString(" ")
-	if numCallees == 1 {
-		b.WriteString("other function: ")
-	} else {
-		b.WriteString("other functions, including: ")
+	names := sortedFuncNames(cg)
+
+	internalCalls := 0
+	for _, n := range names {
+		internalCalls += len(cg.Functions[n].Callees)
 	}
 
-	count := 0
-	for callee := range calleeSet {
-		if count >= 3 {
-			b.WriteString(", and others")
-			break
+	b.WriteString("The codebase has " + strconv.Itoa(len(cg.Functions)) +
+		" functions with " + strconv.Itoa(internalCalls) + " internal calls")
+	if cg.ExternalCalls > 0 {
+		b.WriteString(" and " + strconv.Itoa(cg.ExternalCalls) + " external calls")
+	}
+	b.WriteString(".")
+
+	if eps := entryPointNames(cg); len(eps) > 0 {
+		b.WriteString(" Entry points include: " + joinCode(capStrings(eps, 12)) + ".")
+	}
+	b.WriteString("\n\n")
+
+	// Group functions by their package for a per-package walk-through.
+	byPkg := make(map[string][]string)
+	var pkgs []string
+	for _, n := range names {
+		p := cg.Functions[n].Package
+		if _, ok := byPkg[p]; !ok {
+			pkgs = append(pkgs, p)
 		}
-
-		if count > 0 {
-			b.WriteString(", ")
-		}
-		b.WriteString("`")
-		b.WriteString(callee)
-		b.WriteString("`")
-		count++
+		byPkg[p] = append(byPkg[p], n)
 	}
+	sort.Strings(pkgs)
 
-	if len(calls) > 0 {
-		loc := calls[0]
-		b.WriteString(" (called at `")
-		b.WriteString(filepath.Base(loc.File))
-		b.WriteString(":")
-		b.WriteString(strconv.Itoa(int(loc.Line)))
-		b.WriteString("`)")
-	}
-
-	b.WriteString(".\n\n")
-
-	return b.String()
-}
-
-// formatNumber formats a number with words for readability.
-func formatNumber(n int) string {
-	if n == 0 {
-		return "no"
-	}
-	if n == 1 {
-		return "one"
-	}
-	if n < 20 {
-		words := []string{"zero", "one", "two", "three", "four", "five",
-			"six", "seven", "eight", "nine", "ten", "eleven", "twelve",
-			"thirteen", "fourteen", "fifteen", "sixteen", "seventeen",
-			"eighteen", "nineteen"}
-		if n < len(words) {
-			return words[n]
-		}
-	}
-
-	if n < 100 {
-		tens := []string{"", "", "twenty", "thirty", "forty", "fifty",
-			"sixty", "seventy", "eighty", "ninety"}
-		t := n / 10
-		u := n % 10
-
-		if t > 0 && t < len(tens) {
-			result := tens[t]
-			if u > 0 {
-				words := []string{"zero", "one", "two", "three", "four", "five",
-					"six", "seven", "eight", "nine"}
-				if u < len(words) {
-					result += "-" + words[u]
-				} else {
-					result += string(rune('0' + u))
-				}
+	for _, p := range pkgs {
+		var body strings.Builder
+		for _, n := range byPkg[p] {
+			info := cg.Functions[n]
+			if len(info.Callees) == 0 {
+				continue
 			}
-			return result
+			body.WriteString(describeFunction(n, info))
 		}
-	}
-
-	if n >= 100 && n <= 999 {
-		hundreds := n / 100
-		remainder := n % 100
-
-		hundredsWords := []string{"zero", "one", "two", "three", "four", "five",
-			"six", "seven", "eight", "nine"}
-
-		if hundreds < len(hundredsWords) {
-			result := hundredsWords[hundreds] + " hundred"
-			if remainder > 0 {
-				result += " " + formatNumber(remainder)
-			}
-			return result
-		}
-	}
-
-	return strconv.Itoa(n)
-}
-
-// GenerateCallFlow describes the execution flow for a specific entry point.
-func GenerateCallFlow(entryPoint string, packages map[string]*processor.Result) string {
-	var b strings.Builder
-
-	b.WriteString("### Execution Flow: `")
-	b.WriteString(entryPoint)
-	b.WriteString("`\n\n")
-
-	// Merge per-package outgoing-call maps into a single caller -> callees view.
-	outgoing := make(map[string][]processor.CallInfo)
-	for _, pkg := range packages {
-		if pkg == nil {
-			continue
-		}
-		for caller, calls := range outgoingCalls(pkg.CallGraph) {
-			outgoing[caller] = append(outgoing[caller], calls...)
-		}
-	}
-
-	visited := make(map[string]bool)
-	traverseCallFlow(entryPoint, outgoing, &b, visited, 0)
-
-	return b.String()
-}
-
-func traverseCallFlow(funcName string, outgoing map[string][]processor.CallInfo, b *strings.Builder, visited map[string]bool, depth int) {
-	indent := strings.Repeat("  ", depth)
-
-	if visited[funcName] {
-		b.WriteString(indent + "- `" + funcName + "` *cycle detected*\n")
-		return
-	}
-	visited[funcName] = true
-
-	calls := outgoing[funcName]
-	if len(calls) == 0 {
-		b.WriteString(indent + "- `" + funcName + "` (no outgoing calls)\n")
-		return
-	}
-
-	b.WriteString(indent + "- `" + funcName + "` calls:\n")
-	for _, call := range calls {
-		if depth < 3 {
-			traverseCallFlow(call.CalleeName, outgoing, b, visited, depth+1)
-		} else {
-			b.WriteString(indent + "  - `" + call.CalleeName + "` (depth limit)\n")
-		}
-	}
-}
-
-// GenerateDependencyMap creates a simplified dependency map for the package.
-func GenerateDependencyMap(packages map[string]*processor.Result) string {
-	var b strings.Builder
-
-	b.WriteString("### Package Dependencies\n\n")
-
-	stdLibPkgs := []string{"fmt", "strings", "bytes", "io", "os", "path", "strconv", "time", "log"}
-
-	for pkgName, pkg := range packages {
-		if pkg == nil {
-			continue
-		}
-
-		externalCalls := make(map[string]bool)
-
-		for _, calls := range pkg.CallGraph {
-			for _, call := range calls {
-				for _, stdPkg := range stdLibPkgs {
-					if strings.HasPrefix(call.CalleeName, stdPkg+".") {
-						externalCalls[stdPkg] = true
-						break
-					}
-				}
-			}
-		}
-
-		if len(externalCalls) > 0 {
-			b.WriteString("**`")
-			b.WriteString(pkgName)
-			b.WriteString("`** uses:\n\n")
-
-			for stdPkg := range externalCalls {
-				b.WriteString("- `")
-				b.WriteString(stdPkg)
-				b.WriteString("`\n")
-			}
-
+		if body.Len() > 0 {
+			b.WriteString("**Package `" + p + "`:**\n\n")
+			b.WriteString(body.String())
 			b.WriteString("\n")
 		}
 	}
 
 	return b.String()
+}
+
+// describeFunction renders one sentence about a function's outgoing calls.
+func describeFunction(name string, info *goparser.FuncInfo) string {
+	callees := uniqueCalleeNames(info)
+	var b strings.Builder
+	b.WriteString("- `" + name + "` ")
+
+	switch len(callees) {
+	case 1:
+		b.WriteString("calls `" + callees[0] + "`.\n")
+	default:
+		shown := capStrings(callees, 5)
+		b.WriteString("calls " + strconv.Itoa(len(callees)) + " functions: " + joinCode(shown))
+		if len(callees) > len(shown) {
+			b.WriteString(", and others")
+		}
+		b.WriteString(".\n")
+	}
+	return b.String()
+}
+
+// GenerateCallFlow describes the execution flow for a specific entry point by
+// walking the call graph depth-first with cycle detection.
+func GenerateCallFlow(entryPoint string, cg *goparser.CallGraph) string {
+	var b strings.Builder
+	b.WriteString("### Execution Flow: `" + entryPoint + "`\n\n")
+	if cg == nil {
+		return b.String()
+	}
+	traverseCallFlow(entryPoint, cg, &b, map[string]bool{}, 0)
+	b.WriteString("\n")
+	return b.String()
+}
+
+func traverseCallFlow(name string, cg *goparser.CallGraph, b *strings.Builder, visited map[string]bool, depth int) {
+	indent := strings.Repeat("  ", depth)
+
+	if visited[name] {
+		b.WriteString(indent + "- `" + name + "` *(cycle)*\n")
+		return
+	}
+	visited[name] = true
+
+	info := cg.Functions[name]
+	if info == nil || len(info.Callees) == 0 {
+		b.WriteString(indent + "- `" + name + "` (no internal calls)\n")
+		return
+	}
+
+	b.WriteString(indent + "- `" + name + "` calls:\n")
+	for _, callee := range uniqueCalleeNames(info) {
+		if depth < 3 {
+			traverseCallFlow(callee, cg, b, visited, depth+1)
+		} else {
+			b.WriteString(indent + "  - `" + callee + "` …\n")
+		}
+	}
+}
+
+// GenerateDependencyMap lists the external packages each module package calls
+// into, derived from the type-checked external-call edges.
+func GenerateDependencyMap(cg *goparser.CallGraph) string {
+	var b strings.Builder
+	b.WriteString("### Package Dependencies\n\n")
+	if cg == nil {
+		return b.String()
+	}
+	// The typed graph records external-call counts but not their packages, so
+	// this section intentionally stays high-level for now.
+	if cg.ExternalCalls > 0 {
+		b.WriteString("The module makes " + strconv.Itoa(cg.ExternalCalls) +
+			" calls into the standard library and third-party packages.\n\n")
+	} else {
+		b.WriteString("No external package calls detected.\n\n")
+	}
+	return b.String()
+}
+
+// entryPointNames returns functions nothing in the module calls, plus main.
+func entryPointNames(cg *goparser.CallGraph) []string {
+	var eps []string
+	for name, info := range cg.Functions {
+		if info == nil {
+			continue
+		}
+		if len(info.Callers) == 0 || name == "main" || strings.HasSuffix(name, ".main") {
+			eps = append(eps, name)
+		}
+	}
+	eps = deduplicateStrings(eps)
+	sort.Strings(eps)
+	return eps
+}
+
+func sortedFuncNames(cg *goparser.CallGraph) []string {
+	names := make([]string, 0, len(cg.Functions))
+	for n := range cg.Functions {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// uniqueCalleeNames returns a function's distinct callees in sorted order.
+func uniqueCalleeNames(info *goparser.FuncInfo) []string {
+	seen := make(map[string]bool, len(info.Callees))
+	var names []string
+	for _, c := range info.Callees {
+		if !seen[c.Name] {
+			seen[c.Name] = true
+			names = append(names, c.Name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// capStrings returns at most n elements of s.
+func capStrings(s []string, n int) []string {
+	if len(s) > n {
+		return s[:n]
+	}
+	return s
+}
+
+// joinCode renders a list as comma-separated inline code spans.
+func joinCode(items []string) string {
+	quoted := make([]string, len(items))
+	for i, it := range items {
+		quoted[i] = "`" + it + "`"
+	}
+	return strings.Join(quoted, ", ")
 }

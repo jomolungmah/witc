@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/ai-suite/witc/internal/processor"
+	goparser "github.com/ai-suite/witc/internal/processor/go"
 )
 
 func TestMarkdown(t *testing.T) {
@@ -93,10 +94,13 @@ func TestMarkdown_ShowsOutgoingCalls(t *testing.T) {
 					{Name: "Caller", Signature: "func()"},
 					{Name: "callee", Signature: "func()"},
 				},
-				// Keyed by callee; Caller calls callee at p.go:3.
-				CallGraph: map[string][]processor.CallInfo{
-					"callee": {{CalleeName: "callee", File: "p.go", Line: 3, ParentFunc: "Caller"}},
-				},
+			},
+		},
+		// Inline calls are sourced from the type-checked graph by qualified name.
+		CallGraph: &goparser.CallGraph{
+			Functions: map[string]*goparser.FuncInfo{
+				"pkg.Caller": {Name: "pkg.Caller", Package: "pkg", Callees: []goparser.Callee{{Name: "pkg.callee"}}},
+				"pkg.callee": {Name: "pkg.callee", Package: "pkg", Callers: []goparser.Caller{{Name: "pkg.Caller"}}},
 			},
 		},
 	}
@@ -107,7 +111,7 @@ func TestMarkdown_ShowsOutgoingCalls(t *testing.T) {
 	}
 	// The outgoing call must be listed under Caller, pointing at callee.
 	callerIdx := strings.Index(out, "func Caller()")
-	calleeRef := strings.Index(out, "`callee` (at p.go:3)")
+	calleeRef := strings.Index(out, "Calls: `pkg.callee`")
 	if callerIdx < 0 || calleeRef < 0 {
 		t.Fatalf("expected Caller to list outgoing call to callee, got:\n%s", out)
 	}
