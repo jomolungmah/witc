@@ -9,6 +9,7 @@ import (
 	"github.com/jomolungmah/witc/internal/formatter"
 	"github.com/jomolungmah/witc/internal/processor"
 	goparser "github.com/jomolungmah/witc/internal/processor/go"
+	"github.com/jomolungmah/witc/internal/progress"
 	"github.com/jomolungmah/witc/internal/scanner"
 	"github.com/spf13/cobra"
 )
@@ -21,6 +22,7 @@ var (
 	includeTests bool
 	detail       string
 	maxTokens    int
+	noProgress   bool
 )
 
 func main() {
@@ -43,6 +45,7 @@ func main() {
 	summarizeCmd.Flags().BoolVar(&includeTests, "include-tests", false, "Include _test.go files in the summary")
 	summarizeCmd.Flags().StringVar(&detail, "detail", "high", "Output detail: low (API only), medium (+call graph, metrics), high (everything)")
 	summarizeCmd.Flags().IntVar(&maxTokens, "max-tokens", 0, "Cap estimated output size in tokens (0 = unlimited)")
+	summarizeCmd.Flags().BoolVar(&noProgress, "no-progress", false, "Disable progress output on stderr")
 
 	rootCmd.AddCommand(summarizeCmd)
 
@@ -85,8 +88,13 @@ func runSummarize(cmd *cobra.Command, args []string) error {
 		MaxTokens:   maxTokens,
 	}
 
+	// Progress goes to stderr so it never corrupts the summary on stdout or in
+	// the output file; it auto-disables when stderr isn't an interactive terminal.
+	rep := progress.New(os.Stderr, !noProgress && progress.IsTerminal(os.Stderr))
+
 	ctx := context.Background()
-	for _, f := range files {
+	for i, f := range files {
+		rep.Step("Parsing files", i+1, len(files))
 		if !proc.Supports(f.Ext) {
 			continue
 		}
@@ -115,13 +123,18 @@ func runSummarize(cmd *cobra.Command, args []string) error {
 
 	// Prefer a type-checked call graph (resolves callees precisely and merges
 	// duplicate nodes); fall back to the AST-only aggregate if the module can't
-	// be loaded or type-checked.
-	if typed, err := goparser.BuildTypedCallGraph(root); err == nil {
+	// be loaded or type-checked. This phase type-checks the dependency tree and
+	// is usually the slowest, so show an indeterminate spinner while it runs.
+	stop := rep.Spin("Building call graph (type-checking)")
+	typed, typedErr := goparser.BuildTypedCallGraph(root)
+	stop()
+	if typedErr == nil {
 		sum.CallGraph = typed
 	} else {
-		fmt.Fprintf(os.Stderr, "witc: using AST call graph (%v)\n", err)
+		fmt.Fprintf(os.Stderr, "witc: using AST call graph (%v)\n", typedErr)
 		sum.CallGraph = goparser.Aggregate(results)
 	}
+	rep.Done(fmt.Sprintf("Analyzed %d files in %d packages", len(sum.Paths), len(sum.Packages)))
 
 	var out string
 	switch format {

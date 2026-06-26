@@ -41,6 +41,7 @@ witc summarize [path] [flags]
 | `--no-structure` | (bool) | off | Omit the file-tree section |
 | `--include-tests` | (bool) | off | Include `_test.go` files (excluded by default) |
 | `--exclude-generated` | (bool) | off | Skip Go files marked as generated |
+| `--no-progress` | (bool) | off | Disable the progress bar/spinner printed to stderr (auto-disabled when stderr isn't a terminal) |
 
 ### Common invocations
 

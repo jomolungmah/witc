@@ -87,6 +87,7 @@ declared functions and methods:
 | `--no-structure` | `false` | Omit the file tree |
 | `--include-tests` | `false` | Include `_test.go` files |
 | `--exclude-generated` | `false` | Skip Go files marked as generated |
+| `--no-progress` | `false` | Disable the stderr progress bar/spinner (auto-off when stderr isn't a terminal) |
 
 ## Output sections
 
