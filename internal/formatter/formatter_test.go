@@ -1,6 +1,7 @@
 package formatter
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -265,12 +266,23 @@ func TestMarkdown_ArchitectureSection(t *testing.T) {
 	}
 }
 
-func TestJSON(t *testing.T) {
+func TestJSON_Schema(t *testing.T) {
 	sum := &Summary{
-		Root:  "/tmp/example",
-		Paths: []string{"main.go"},
+		Root: "/tmp/example",
 		Packages: map[string]*processor.Result{
-			".": {Package: "main", Functions: []processor.Function{{Name: "main", Signature: "func()"}}},
+			"cmd/app": {
+				Package:   "main",
+				Doc:       "Package main is the entry point.",
+				Functions: []processor.Function{{Name: "main", Doc: "main runs the app.", Signature: "func()"}},
+			},
+			"internal/svc": {Package: "svc", Structs: []processor.Struct{{Name: "S", Doc: "S serves."}}},
+		},
+		CallGraph: &goparser.CallGraph{
+			ExternalCalls: 3,
+			Functions: map[string]*goparser.FuncInfo{
+				"main.main": {Name: "main.main", Package: "example.com/m/cmd/app", Callees: []goparser.Callee{{Name: "svc.Do"}}},
+				"svc.Do":    {Name: "svc.Do", Package: "example.com/m/internal/svc", Callers: []goparser.Caller{{Name: "main.main"}}},
+			},
 		},
 	}
 
@@ -278,17 +290,45 @@ func TestJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("JSON: %v", err)
 	}
-	if out == "" {
-		t.Error("expected non-empty output")
-	}
-	if !strings.Contains(out, "Root") || !strings.Contains(out, "Packages") {
-		t.Errorf("output should be valid JSON, got: %q", out[:min(100, len(out))])
-	}
-}
 
-func min(a, b int) int {
-	if a < b {
-		return a
+	var got struct {
+		SchemaVersion string `json:"schemaVersion"`
+		Root          string `json:"root"`
+		Packages      []struct {
+			ImportPath string `json:"importPath"`
+			Doc        string `json:"doc"`
+		} `json:"packages"`
+		CallGraph *struct {
+			Functions     []map[string]any `json:"functions"`
+			ExternalCalls int              `json:"externalCalls"`
+		} `json:"callGraph"`
+		Metrics      map[string]any `json:"metrics"`
+		Architecture struct {
+			EntryPoints         []string            `json:"entryPoints"`
+			PackageDependencies map[string][]string `json:"packageDependencies"`
+		} `json:"architecture"`
 	}
-	return b
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("output is not valid JSON for the documented schema: %v", err)
+	}
+
+	if got.SchemaVersion != SchemaVersion {
+		t.Errorf("schemaVersion = %q, want %q", got.SchemaVersion, SchemaVersion)
+	}
+	if got.Root != "/tmp/example" {
+		t.Errorf("root = %q", got.Root)
+	}
+	if len(got.Packages) != 2 || got.Packages[0].ImportPath != "cmd/app" {
+		t.Errorf("packages not sorted/complete: %+v", got.Packages)
+	}
+	if got.CallGraph == nil || got.CallGraph.ExternalCalls != 3 {
+		t.Errorf("callGraph externalCalls missing: %+v", got.CallGraph)
+	}
+	if got.Metrics == nil {
+		t.Error("metrics missing")
+	}
+	deps := got.Architecture.PackageDependencies["cmd/app"]
+	if len(deps) != 1 || deps[0] != "internal/svc" {
+		t.Errorf("package dependencies = %v, want [internal/svc]", deps)
+	}
 }

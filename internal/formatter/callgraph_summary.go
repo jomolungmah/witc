@@ -197,6 +197,20 @@ func uniqueCalleeNames(info *goparser.FuncInfo) []string {
 	return names
 }
 
+// uniqueCallerNames returns a function's distinct callers in sorted order.
+func uniqueCallerNames(info *goparser.FuncInfo) []string {
+	seen := make(map[string]bool, len(info.Callers))
+	var names []string
+	for _, c := range info.Callers {
+		if !seen[c.Name] {
+			seen[c.Name] = true
+			names = append(names, c.Name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
 // capStrings returns at most n elements of s.
 func capStrings(s []string, n int) []string {
 	if len(s) > n {

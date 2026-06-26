@@ -10,9 +10,10 @@ Each item lists the problem, the evidence in the code, a proposed approach, and
 acceptance criteria so it can be picked up independently. They are ordered by
 value-to-effort. Start at the top.
 
-> **Progress:** Items 1 (doc comments), 2 (token/size budgeting), 3 (default
-> selectivity), and 4 (package-level orientation) are done. Next up: item 5
-> (stable JSON schema).
+> **Progress:** All five items are done — 1 (doc comments), 2 (token/size
+> budgeting), 3 (default selectivity), 4 (package-level orientation), and 5
+> (stable JSON schema, see `docs/json-schema.md`). Remaining work is the
+> "lower priority / later" list below.
 
 > Out of scope for now (deliberately deferred): multi-language support. The
 > `processor.Processor` interface is generic but only Go is wired. This is a
