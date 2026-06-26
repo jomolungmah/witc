@@ -1,6 +1,7 @@
 package formatter
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -117,6 +118,81 @@ func TestMarkdown_ShowsOutgoingCalls(t *testing.T) {
 	}
 	if calleeRef < callerIdx {
 		t.Errorf("outgoing call should appear under Caller, got:\n%s", out)
+	}
+}
+
+func bigSummary(nFuncs int) *Summary {
+	fns := make([]processor.Function, nFuncs)
+	for i := range fns {
+		fns[i] = processor.Function{
+			Name:      fmt.Sprintf("Func%02d", i),
+			Doc:       "Func does something moderately wordy for token accounting.",
+			Signature: "func(input string, count int) (result string, err error)",
+		}
+	}
+	return &Summary{
+		Root:     "/tmp/example",
+		Paths:    []string{"pkg/a.go"},
+		Packages: map[string]*processor.Result{"pkg": {Package: "pkg", Functions: fns}},
+		CallGraph: &goparser.CallGraph{
+			Functions: map[string]*goparser.FuncInfo{},
+		},
+	}
+}
+
+func TestMarkdown_DetailLevels(t *testing.T) {
+	sum := bigSummary(3)
+
+	sum.Detail = detailLow
+	low, _ := Markdown(sum)
+	if strings.Contains(low, "## Call Graph") || strings.Contains(low, "## Metrics") {
+		t.Errorf("low detail should omit call graph and metrics:\n%s", low)
+	}
+	if !strings.Contains(low, "## Packages") {
+		t.Error("low detail must still contain the package API surface")
+	}
+
+	sum.Detail = detailMedium
+	med, _ := Markdown(sum)
+	if !strings.Contains(med, "## Call Graph") || !strings.Contains(med, "## Metrics") {
+		t.Error("medium detail should include call graph and metrics")
+	}
+	if strings.Contains(med, "### Call Flow Summary") {
+		t.Error("medium detail should omit the prose call-flow summary")
+	}
+
+	sum.Detail = detailHigh
+	high, _ := Markdown(sum)
+	if !strings.Contains(high, "### Call Flow Summary") {
+		t.Error("high detail should include the prose call-flow summary")
+	}
+}
+
+func TestMarkdown_MaxTokensEnforced(t *testing.T) {
+	sum := bigSummary(60) // far more than a small budget can hold
+	sum.MaxTokens = 1000
+
+	out, _ := Markdown(sum)
+
+	if got := estimateTokens(out); got > sum.MaxTokens {
+		t.Errorf("output is %d tokens, over budget %d", got, sum.MaxTokens)
+	}
+	if !strings.Contains(out, "## Packages") {
+		t.Error("budgeted output must still contain the package list")
+	}
+	if !strings.Contains(out, "omitted") && !strings.Contains(out, "truncated") {
+		t.Error("expected a note that content was omitted/truncated")
+	}
+}
+
+func TestMarkdown_UnlimitedIncludesAll(t *testing.T) {
+	sum := bigSummary(60) // MaxTokens 0
+	out, _ := Markdown(sum)
+	if strings.Contains(out, "omitted") || strings.Contains(out, "truncated") {
+		t.Errorf("unlimited output should not truncate")
+	}
+	if !strings.Contains(out, "Func59") {
+		t.Error("unlimited output should contain every function")
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/ai-suite/witc/internal/processor"
 	goparser "github.com/ai-suite/witc/internal/processor/go"
 )
 
@@ -34,216 +35,430 @@ func writeTypedCalls(b *strings.Builder, cg *goparser.CallGraph, qualified, inde
 	b.WriteString(indent + "Calls: " + joinCode(uniqueCalleeNames(info)) + "\n")
 }
 
-// Markdown formats the summary as markdown.
+// Output detail levels.
+const (
+	detailLow    = "low"
+	detailMedium = "medium"
+	detailHigh   = "high"
+)
+
+// section is one emitted block, tagged with a drop priority. Lower rank is more
+// important and dropped last; ranks 0 (header) and 1 (API surface) are core and
+// never dropped wholesale (the API surface is truncated instead).
+type section struct {
+	rank    int
+	content string
+}
+
+// estimateTokens is a cheap heuristic (~4 chars per token) used for budgeting.
+func estimateTokens(s string) int {
+	return len(s) / 4
+}
+
+// detailMaxRank maps a detail level to the highest section rank it emits.
+func detailMaxRank(detail string) int {
+	switch detail {
+	case detailLow:
+		return 1 // header + API surface
+	case detailMedium:
+		return 4 // + structure, call graph, metrics
+	default:
+		return 7 // everything
+	}
+}
+
+// Markdown formats the summary as markdown, honouring sum.Detail and
+// sum.MaxTokens. Content is organised into ranked sections; when a token budget
+// is set, the least important sections are dropped (and the API surface
+// truncated) until the estimate fits.
 func Markdown(sum *Summary) (string, error) {
-	var b strings.Builder
+	detail := sum.Detail
+	if detail == "" {
+		detail = detailHigh
+	}
+	maxRank := detailMaxRank(detail)
+	includeInlineCalls := detail == detailHigh
 
-	b.WriteString(fmt.Sprintf("# witc summary: %s\n\n", sum.Root))
+	header := fmt.Sprintf("# witc summary: %s\n\n", sum.Root)
 
-	if !sum.NoStructure && len(sum.Paths) > 0 {
-		b.WriteString("## Structure\n\n```\n")
-		b.WriteString(filepath.Base(sum.Root) + "\n")
-		b.WriteString(treeFromPaths(sum.Paths))
-		b.WriteString("```\n\n")
+	// The API surface is core; build it with whatever budget remains after the
+	// (tiny) header so it can truncate itself when it alone exceeds the budget.
+	apiBudget := 0
+	if sum.MaxTokens > 0 {
+		apiBudget = sum.MaxTokens - estimateTokens(header)
+		if apiBudget < 0 {
+			apiBudget = 0
+		}
 	}
 
-	// Sort packages for deterministic output
+	// Sections in output order; empty ones and those above maxRank are dropped.
+	candidates := []section{
+		{0, header},
+		{2, structureSection(sum)},
+		{1, apiSection(sum, includeInlineCalls, apiBudget)},
+		{3, callGraphSection(sum.CallGraph)},
+		{4, metricsSection(sum.CallGraph)},
+		{5, GenerateCallSummary(sum.CallGraph)},
+		{6, GenerateDependencyMap(sum.CallGraph)},
+		{7, execFlowSection(sum.CallGraph)},
+	}
+
+	var kept []section
+	for _, s := range candidates {
+		if s.rank <= maxRank && s.content != "" {
+			kept = append(kept, s)
+		}
+	}
+
+	kept = trimToBudget(kept, sum.MaxTokens)
+
+	var b strings.Builder
+	for _, s := range kept {
+		b.WriteString(s.content)
+	}
+	return clampTokens(b.String(), sum.MaxTokens), nil
+}
+
+// clampTokens is the final hard guarantee that output fits the budget. Section
+// dropping and symbol truncation handle this gracefully in the common case;
+// this only trims residual overhead (package headers, omission notes) by
+// dropping whole trailing lines so the estimate never exceeds maxTokens.
+func clampTokens(s string, maxTokens int) string {
+	if maxTokens <= 0 || estimateTokens(s) <= maxTokens {
+		return s
+	}
+	const marker = "_… output truncated to fit token budget_\n"
+	limit := maxTokens*4 - len(marker)
+	if limit < 0 || limit >= len(s) {
+		return s
+	}
+	cut := s[:limit]
+	if i := strings.LastIndexByte(cut, '\n'); i > 0 {
+		cut = cut[:i+1]
+	}
+	return cut + marker
+}
+
+// trimToBudget drops sections, highest rank first, until the estimated total
+// fits within maxTokens (0 = unlimited). Core sections (rank <= 1) are kept.
+func trimToBudget(secs []section, maxTokens int) []section {
+	if maxTokens <= 0 {
+		return secs
+	}
+	for {
+		total := 0
+		for _, s := range secs {
+			total += estimateTokens(s.content)
+		}
+		if total <= maxTokens {
+			return secs
+		}
+		victim, maxRank := -1, 1
+		for i, s := range secs {
+			if s.rank > maxRank {
+				maxRank, victim = s.rank, i
+			}
+		}
+		if victim == -1 {
+			return secs // only core remains; API was already budget-truncated
+		}
+		secs = append(secs[:victim], secs[victim+1:]...)
+	}
+}
+
+func structureSection(sum *Summary) string {
+	if sum.NoStructure || len(sum.Paths) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("## Structure\n\n```\n")
+	b.WriteString(filepath.Base(sum.Root) + "\n")
+	b.WriteString(treeFromPaths(sum.Paths))
+	b.WriteString("```\n\n")
+	return b.String()
+}
+
+// apiSection renders the package/symbol API surface. When budget > 0, symbols
+// are emitted in importance order (types, then exported and unexported
+// functions by call-graph centrality) and truncated once the budget is hit,
+// with a per-package note of how many were omitted.
+func apiSection(sum *Summary, includeInlineCalls bool, budget int) string {
 	pkgNames := make([]string, 0, len(sum.Packages))
 	for k := range sum.Packages {
 		pkgNames = append(pkgNames, k)
 	}
 	sort.Strings(pkgNames)
 
+	var b strings.Builder
 	b.WriteString("## Packages\n\n")
+	tokens := estimateTokens(b.String())
+
 	for _, pkg := range pkgNames {
 		r := sum.Packages[pkg]
 		if r == nil {
 			continue
 		}
-		b.WriteString(fmt.Sprintf("### %s\n\n", pkg))
+		head := fmt.Sprintf("### %s\n\n", pkg)
 		if r.Doc != "" {
-			b.WriteString("_" + r.Doc + "_\n\n")
+			head += "_" + r.Doc + "_\n\n"
 		}
+		b.WriteString(head)
+		tokens += estimateTokens(head)
 
-		for _, s := range r.Structs {
-			// Struct with fields summary
-			if len(s.Fields) > 0 {
-				fieldStrs := make([]string, 0, len(s.Fields))
-				for _, f := range s.Fields {
-					if f.Name != "" {
-						fieldStrs = append(fieldStrs, f.Name+" "+f.Type)
-					} else {
-						fieldStrs = append(fieldStrs, f.Type)
-					}
-				}
-				b.WriteString(fmt.Sprintf("- `type %s struct { %s }`\n", s.Name, strings.Join(fieldStrs, "; ")))
-			} else if len(s.Methods) > 0 {
-				b.WriteString(fmt.Sprintf("- `type %s struct`\n", s.Name))
-			}
-			if len(s.Fields) > 0 || len(s.Methods) > 0 {
-				writeDoc(&b, s.Doc, "  ")
-			}
-			for _, m := range s.Methods {
-				b.WriteString(fmt.Sprintf("  - `func (%s) %s%s`\n", m.Receiver, m.Name, stripFuncKeyword(m.Signature)))
-				writeDoc(&b, m.Doc, "    ")
-				qualified := r.Package + ".(" + m.Receiver + ")." + m.Name
-				writeTypedCalls(&b, sum.CallGraph, qualified, "    ")
-			}
-		}
-
-		for _, iface := range r.Interfaces {
-			if len(iface.Methods) > 0 {
-				methStrs := make([]string, 0, len(iface.Methods))
-				for _, m := range iface.Methods {
-					if m.Name != "" {
-						methStrs = append(methStrs, m.Name+stripFuncKeyword(m.Signature))
-					} else {
-						methStrs = append(methStrs, m.Signature)
-					}
-				}
-				b.WriteString(fmt.Sprintf("- `type %s interface { %s }`\n", iface.Name, strings.Join(methStrs, "; ")))
-			} else {
-				b.WriteString(fmt.Sprintf("- `type %s interface`\n", iface.Name))
-			}
-			writeDoc(&b, iface.Doc, "  ")
-		}
-
-		for _, fn := range r.Functions {
-			sig := fn.Signature
-			if strings.HasPrefix(sig, "func") {
-				sig = "func " + fn.Name + sig[4:]
-			} else {
-				sig = "func " + fn.Name + " " + sig
-			}
-			b.WriteString(fmt.Sprintf("- `%s`\n", sig))
-			writeDoc(&b, fn.Doc, "  ")
-			writeTypedCalls(&b, sum.CallGraph, r.Package+"."+fn.Name, "  ")
-		}
-
-		b.WriteString("\n")
-	}
-
-	// Add Call Graph section after Packages
-	b.WriteString("\n## Call Graph\n\n")
-
-	if sum.CallGraph != nil && len(sum.CallGraph.Functions) > 0 {
-		b.WriteString("### Function Relationships\n\n")
-		b.WriteString("| Function | Calls | Called By |\n")
-		b.WriteString("|----------|-------|-----------|\n")
-
-		funcNames := make([]string, 0, len(sum.CallGraph.Functions))
-		for name := range sum.CallGraph.Functions {
-			funcNames = append(funcNames, name)
-		}
-		sort.Strings(funcNames)
-
-		for _, funcName := range funcNames {
-			callList := sum.CallGraph.Functions[funcName]
-			callerMap := make(map[string]bool)
-			for _, c := range callList.Callers {
-				callerMap[c.Name] = true
-			}
-			callers := make([]string, 0, len(callerMap))
-			for name := range callerMap {
-				callers = append(callers, name)
-			}
-			sort.Strings(callers)
-
-			callersStr := strings.Join(callers, ", ")
-			b.WriteString(fmt.Sprintf("| `%s` | %d | %s |\n", funcName, len(callList.Callees), callersStr))
-		}
-
-		b.WriteString("\n### Entry Points\n\n")
-		entryPoints := entryPointNames(sum.CallGraph)
-		if len(entryPoints) > 0 {
-			for _, ep := range entryPoints {
-				b.WriteString(fmt.Sprintf("- `%s`\n", ep))
-			}
-		} else {
-			b.WriteString("_No clear entry points detected_\n")
-		}
-
-		b.WriteString("\n### Leaf Functions\n\n")
-		leafFuncs := findLeafFunctions(sum.CallGraph)
-		if len(leafFuncs) > 0 {
-			for _, lf := range leafFuncs {
-				b.WriteString(fmt.Sprintf("- `%s`\n", lf))
-			}
-		} else {
-			b.WriteString("_No leaf functions detected_\n")
-		}
-
-		b.WriteString("\n### Cross-File Dependencies\n\n")
-		showCrossFileDeps(&b, sum.CallGraph)
-	} else {
-		b.WriteString("*No call graph data available*\n")
-	}
-
-	b.WriteString("\n## Metrics\n\n")
-
-	if sum.CallGraph != nil && len(sum.CallGraph.Functions) > 0 {
-		metrics := goparser.CalculateMetrics(sum.CallGraph)
-
-		if metrics.TotalFunctions > 0 {
-			b.WriteString("### Overview\n\n")
-			b.WriteString(fmt.Sprintf("- **Total Functions:** %d\n", metrics.TotalFunctions))
-			b.WriteString(fmt.Sprintf("- **Total Calls:** %d\n", metrics.TotalCalls))
-			b.WriteString(fmt.Sprintf("- **Average Callees per Function:** %.2f\n", metrics.AvgCalleesPerFunc))
-
-			if metrics.TotalCalls > 0 {
-				externalPct := float64(metrics.ExternalCalls) / float64(metrics.TotalCalls) * 100
-				b.WriteString(fmt.Sprintf("- **External Calls:** %d (%.1f%%)\n", metrics.ExternalCalls, externalPct))
-			}
-
-			if metrics.MaxFanIn != "" {
-				b.WriteString(fmt.Sprintf("- **Most Called Function:** `%s` (called by %d functions)\n",
-					metrics.MaxFanIn, metrics.MaxFanInCount))
-			}
-
-			if metrics.MaxFanOut != "" {
-				b.WriteString(fmt.Sprintf("- **Highest Fan-out:** `%s` (calls %d other functions)\n",
-					metrics.MaxFanOut, metrics.MaxFanOutCount))
-			}
-
-			if len(metrics.HighCouplingFuncs) > 0 {
-				b.WriteString("\n### High Coupling Functions\n\n")
-				b.WriteString("Functions with many dependencies (may indicate refactoring opportunities):\n\n")
-				displayCount := len(metrics.HighCouplingFuncs)
-				if displayCount > 10 {
-					displayCount = 10
-				}
-				for _, fn := range metrics.HighCouplingFuncs[:displayCount] {
-					b.WriteString(fmt.Sprintf("- `%s`\n", fn))
-				}
-			}
-		} else {
-			b.WriteString("*No metrics available*\n")
-		}
-	} else {
-		b.WriteString("*No call graph data available*\n")
-	}
-
-	b.WriteString(GenerateCallSummary(sum.CallGraph))
-	b.WriteString(GenerateDependencyMap(sum.CallGraph))
-
-	// Trace execution flow for a handful of entry points that actually drive
-	// calls, so the section stays useful without dumping every function.
-	if sum.CallGraph != nil {
-		const maxFlows = 6
-		count := 0
-		for _, ep := range entryPointNames(sum.CallGraph) {
-			info := sum.CallGraph.GetFunction(ep)
-			if info == nil || len(info.Callees) == 0 {
+		omitted := 0
+		for _, entry := range symbolEntries(r, sum.CallGraph, includeInlineCalls) {
+			et := estimateTokens(entry)
+			if budget > 0 && tokens+et > budget {
+				omitted++
 				continue
 			}
-			b.WriteString(GenerateCallFlow(ep, sum.CallGraph))
-			if count++; count >= maxFlows {
-				break
-			}
+			b.WriteString(entry)
+			tokens += et
 		}
+		if omitted > 0 {
+			note := fmt.Sprintf("_… %d more symbol(s) omitted to fit the token budget_\n", omitted)
+			b.WriteString(note)
+			tokens += estimateTokens(note)
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// symbolEntries renders each symbol in a package as a standalone block, ordered
+// by importance so the least useful are the first to be truncated: types, then
+// exported functions by centrality, then unexported functions by centrality.
+func symbolEntries(r *processor.Result, cg *goparser.CallGraph, includeInlineCalls bool) []string {
+	var entries []string
+
+	for _, s := range r.Structs {
+		entries = append(entries, renderStruct(r, s, cg, includeInlineCalls))
+	}
+	for _, iface := range r.Interfaces {
+		entries = append(entries, renderInterface(iface))
 	}
 
-	return b.String(), nil
+	var exported, unexported []processor.Function
+	for _, fn := range r.Functions {
+		if isExported(fn.Name) {
+			exported = append(exported, fn)
+		} else {
+			unexported = append(unexported, fn)
+		}
+	}
+	byCentrality := func(fns []processor.Function) {
+		sort.SliceStable(fns, func(i, j int) bool {
+			ci := centrality(cg, r.Package+"."+fns[i].Name)
+			cj := centrality(cg, r.Package+"."+fns[j].Name)
+			if ci != cj {
+				return ci > cj
+			}
+			return fns[i].Name < fns[j].Name
+		})
+	}
+	byCentrality(exported)
+	byCentrality(unexported)
+	for _, fn := range append(exported, unexported...) {
+		entries = append(entries, renderFunc(r, fn, cg, includeInlineCalls))
+	}
+	return entries
+}
+
+// centrality scores a function's importance as its total call-graph degree.
+func centrality(cg *goparser.CallGraph, qualified string) int {
+	if cg == nil {
+		return 0
+	}
+	if info := cg.GetFunction(qualified); info != nil {
+		return len(info.Callers) + len(info.Callees)
+	}
+	return 0
+}
+
+func renderStruct(r *processor.Result, s processor.Struct, cg *goparser.CallGraph, includeInlineCalls bool) string {
+	var b strings.Builder
+	if len(s.Fields) > 0 {
+		fieldStrs := make([]string, 0, len(s.Fields))
+		for _, f := range s.Fields {
+			if f.Name != "" {
+				fieldStrs = append(fieldStrs, f.Name+" "+f.Type)
+			} else {
+				fieldStrs = append(fieldStrs, f.Type)
+			}
+		}
+		b.WriteString(fmt.Sprintf("- `type %s struct { %s }`\n", s.Name, strings.Join(fieldStrs, "; ")))
+	} else if len(s.Methods) > 0 {
+		b.WriteString(fmt.Sprintf("- `type %s struct`\n", s.Name))
+	}
+	if len(s.Fields) > 0 || len(s.Methods) > 0 {
+		writeDoc(&b, s.Doc, "  ")
+	}
+	for _, m := range s.Methods {
+		b.WriteString(fmt.Sprintf("  - `func (%s) %s%s`\n", m.Receiver, m.Name, stripFuncKeyword(m.Signature)))
+		writeDoc(&b, m.Doc, "    ")
+		if includeInlineCalls {
+			writeTypedCalls(&b, cg, r.Package+".("+m.Receiver+")."+m.Name, "    ")
+		}
+	}
+	return b.String()
+}
+
+func renderInterface(iface processor.Interface) string {
+	var b strings.Builder
+	if len(iface.Methods) > 0 {
+		methStrs := make([]string, 0, len(iface.Methods))
+		for _, m := range iface.Methods {
+			if m.Name != "" {
+				methStrs = append(methStrs, m.Name+stripFuncKeyword(m.Signature))
+			} else {
+				methStrs = append(methStrs, m.Signature)
+			}
+		}
+		b.WriteString(fmt.Sprintf("- `type %s interface { %s }`\n", iface.Name, strings.Join(methStrs, "; ")))
+	} else {
+		b.WriteString(fmt.Sprintf("- `type %s interface`\n", iface.Name))
+	}
+	writeDoc(&b, iface.Doc, "  ")
+	return b.String()
+}
+
+func renderFunc(r *processor.Result, fn processor.Function, cg *goparser.CallGraph, includeInlineCalls bool) string {
+	var b strings.Builder
+	sig := fn.Signature
+	if strings.HasPrefix(sig, "func") {
+		sig = "func " + fn.Name + sig[4:]
+	} else {
+		sig = "func " + fn.Name + " " + sig
+	}
+	b.WriteString(fmt.Sprintf("- `%s`\n", sig))
+	writeDoc(&b, fn.Doc, "  ")
+	if includeInlineCalls {
+		writeTypedCalls(&b, cg, r.Package+"."+fn.Name, "  ")
+	}
+	return b.String()
+}
+
+func callGraphSection(cg *goparser.CallGraph) string {
+	var b strings.Builder
+	b.WriteString("\n## Call Graph\n\n")
+
+	if cg == nil || len(cg.Functions) == 0 {
+		b.WriteString("*No call graph data available*\n")
+		return b.String()
+	}
+
+	b.WriteString("### Function Relationships\n\n")
+	b.WriteString("| Function | Calls | Called By |\n")
+	b.WriteString("|----------|-------|-----------|\n")
+
+	funcNames := make([]string, 0, len(cg.Functions))
+	for name := range cg.Functions {
+		funcNames = append(funcNames, name)
+	}
+	sort.Strings(funcNames)
+
+	for _, funcName := range funcNames {
+		callList := cg.Functions[funcName]
+		callerMap := make(map[string]bool)
+		for _, c := range callList.Callers {
+			callerMap[c.Name] = true
+		}
+		callers := make([]string, 0, len(callerMap))
+		for name := range callerMap {
+			callers = append(callers, name)
+		}
+		sort.Strings(callers)
+		b.WriteString(fmt.Sprintf("| `%s` | %d | %s |\n", funcName, len(callList.Callees), strings.Join(callers, ", ")))
+	}
+
+	b.WriteString("\n### Entry Points\n\n")
+	if entryPoints := entryPointNames(cg); len(entryPoints) > 0 {
+		for _, ep := range entryPoints {
+			b.WriteString(fmt.Sprintf("- `%s`\n", ep))
+		}
+	} else {
+		b.WriteString("_No clear entry points detected_\n")
+	}
+
+	b.WriteString("\n### Leaf Functions\n\n")
+	if leafFuncs := findLeafFunctions(cg); len(leafFuncs) > 0 {
+		for _, lf := range leafFuncs {
+			b.WriteString(fmt.Sprintf("- `%s`\n", lf))
+		}
+	} else {
+		b.WriteString("_No leaf functions detected_\n")
+	}
+
+	b.WriteString("\n### Cross-File Dependencies\n\n")
+	showCrossFileDeps(&b, cg)
+	return b.String()
+}
+
+func metricsSection(cg *goparser.CallGraph) string {
+	var b strings.Builder
+	b.WriteString("\n## Metrics\n\n")
+
+	if cg == nil || len(cg.Functions) == 0 {
+		b.WriteString("*No call graph data available*\n")
+		return b.String()
+	}
+
+	metrics := goparser.CalculateMetrics(cg)
+	if metrics.TotalFunctions == 0 {
+		b.WriteString("*No metrics available*\n")
+		return b.String()
+	}
+
+	b.WriteString("### Overview\n\n")
+	b.WriteString(fmt.Sprintf("- **Total Functions:** %d\n", metrics.TotalFunctions))
+	b.WriteString(fmt.Sprintf("- **Total Calls:** %d\n", metrics.TotalCalls))
+	b.WriteString(fmt.Sprintf("- **Average Callees per Function:** %.2f\n", metrics.AvgCalleesPerFunc))
+
+	if metrics.TotalCalls > 0 {
+		externalPct := float64(metrics.ExternalCalls) / float64(metrics.TotalCalls) * 100
+		b.WriteString(fmt.Sprintf("- **External Calls:** %d (%.1f%%)\n", metrics.ExternalCalls, externalPct))
+	}
+	if metrics.MaxFanIn != "" {
+		b.WriteString(fmt.Sprintf("- **Most Called Function:** `%s` (called by %d functions)\n", metrics.MaxFanIn, metrics.MaxFanInCount))
+	}
+	if metrics.MaxFanOut != "" {
+		b.WriteString(fmt.Sprintf("- **Highest Fan-out:** `%s` (calls %d other functions)\n", metrics.MaxFanOut, metrics.MaxFanOutCount))
+	}
+
+	if len(metrics.HighCouplingFuncs) > 0 {
+		b.WriteString("\n### High Coupling Functions\n\n")
+		b.WriteString("Functions with many dependencies (may indicate refactoring opportunities):\n\n")
+		displayCount := len(metrics.HighCouplingFuncs)
+		if displayCount > 10 {
+			displayCount = 10
+		}
+		for _, fn := range metrics.HighCouplingFuncs[:displayCount] {
+			b.WriteString(fmt.Sprintf("- `%s`\n", fn))
+		}
+	}
+	return b.String()
+}
+
+// execFlowSection traces execution flow for a handful of entry points that
+// actually drive calls, so the section stays useful without dumping everything.
+func execFlowSection(cg *goparser.CallGraph) string {
+	if cg == nil {
+		return ""
+	}
+	var b strings.Builder
+	const maxFlows = 6
+	count := 0
+	for _, ep := range entryPointNames(cg) {
+		info := cg.GetFunction(ep)
+		if info == nil || len(info.Callees) == 0 {
+			continue
+		}
+		b.WriteString(GenerateCallFlow(ep, cg))
+		if count++; count >= maxFlows {
+			break
+		}
+	}
+	return b.String()
 }
 
 func findLeafFunctions(cg *goparser.CallGraph) []string {

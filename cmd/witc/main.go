@@ -19,6 +19,8 @@ var (
 	noStructure  bool
 	excludeGen   bool
 	excludeTests bool
+	detail       string
+	maxTokens    int
 )
 
 func main() {
@@ -39,6 +41,8 @@ func main() {
 	summarizeCmd.Flags().BoolVar(&noStructure, "no-structure", false, "Omit file structure, output API surface only")
 	summarizeCmd.Flags().BoolVar(&excludeGen, "exclude-generated", false, "Skip generated Go files")
 	summarizeCmd.Flags().BoolVar(&excludeTests, "exclude-tests", false, "Exclude test functions from output")
+	summarizeCmd.Flags().StringVar(&detail, "detail", "high", "Output detail: low (API only), medium (+call graph, metrics), high (everything)")
+	summarizeCmd.Flags().IntVar(&maxTokens, "max-tokens", 0, "Cap estimated output size in tokens (0 = unlimited)")
 
 	rootCmd.AddCommand(summarizeCmd)
 
@@ -77,6 +81,8 @@ func runSummarize(cmd *cobra.Command, args []string) error {
 		Paths:       make([]string, 0, len(files)),
 		Packages:    make(map[string]*processor.Result),
 		NoStructure: noStructure,
+		Detail:      detail,
+		MaxTokens:   maxTokens,
 	}
 
 	ctx := context.Background()

@@ -10,6 +10,9 @@ Each item lists the problem, the evidence in the code, a proposed approach, and
 acceptance criteria so it can be picked up independently. They are ordered by
 value-to-effort. Start at the top.
 
+> **Progress:** Item 1 (doc comments) and item 2 (token/size budgeting) are
+> done. Next up: item 3 (default selectivity).
+
 > Out of scope for now (deliberately deferred): multi-language support. The
 > `processor.Processor` interface is generic but only Go is wired. This is a
 > separate, larger effort and is not part of this roadmap.
