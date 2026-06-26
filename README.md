@@ -24,6 +24,8 @@ curl -sSL https://raw.githubusercontent.com/jomolungmah/witc/refs/heads/main/.op
 itc/SKILL.md
 ```
 
+Also make sure that ~/go/bin is in your $PATH so installed binary will be accessible in your shell.
+
 ## Usage
 
 ```bash
