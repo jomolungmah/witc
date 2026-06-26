@@ -21,25 +21,41 @@ Prefer running `witc` once up front over reading many files blindly.
 
 ## How to use
 
-Run it via the shell from the directory you want to summarize (or pass a path):
+Run it via the shell. The only command is `summarize`:
 
-```bash
-witc summarize .
+```
+witc summarize [path] [flags]
 ```
 
-Useful options:
+- `path` is optional and defaults to the current directory. It may be a
+  subdirectory of the module to summarize just that subtree.
 
-- `witc summarize . --detail low` — exported API surface only (smallest).
-- `witc summarize . --detail medium` — adds call graph, metrics, and architecture.
-- `witc summarize . --max-tokens 4000` — cap the output to ~4000 tokens; the
-  least important sections are dropped and low-centrality symbols are truncated
-  so it fits your context window.
-- `witc summarize . --format json` — structured output (versioned schema) for
-  programmatic use.
-- `witc summarize ./somepkg` — summarize a subdirectory.
-- `witc summarize . -o summary.md` — write to a file instead of stdout.
+### Flags
 
-`_test.go` files are excluded by default; add `--include-tests` to include them.
+| Flag | Values | Default | What it does |
+|------|--------|---------|--------------|
+| `--output`, `-o` | file path | stdout | Write the summary to a file instead of stdout |
+| `--format` | `markdown`, `json` | `markdown` | Output format. `json` follows a versioned schema |
+| `--detail` | `low`, `medium`, `high` | `high` | How much to emit: `low` = exported API surface only; `medium` = + call graph, metrics, architecture; `high` = everything (inline calls, prose, execution flow) |
+| `--max-tokens` | integer | `0` | Cap estimated output size in tokens (`0` = unlimited). Least-important sections are dropped first and low-centrality symbols are truncated so it fits a context window |
+| `--no-structure` | (bool) | off | Omit the file-tree section |
+| `--include-tests` | (bool) | off | Include `_test.go` files (excluded by default) |
+| `--exclude-generated` | (bool) | off | Skip Go files marked as generated |
+
+### Common invocations
+
+```bash
+witc summarize .                          # full summary of the current project
+witc summarize . --detail low             # smallest: exported API + docs only
+witc summarize . --detail medium          # + call graph, metrics, architecture
+witc summarize . --max-tokens 4000        # bound the output to ~4000 tokens
+witc summarize ./internal/server          # summarize one subdirectory
+witc summarize . --format json -o out.json  # structured output to a file
+witc summarize . --include-tests          # also cover _test.go files
+```
+
+Tip: when you only need to know what a project is and where things live, start
+with `--detail medium` (or `--detail low --max-tokens N` for a strict budget).
 
 ## Reading the output (markdown)
 
