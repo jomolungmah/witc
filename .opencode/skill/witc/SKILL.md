@@ -42,8 +42,7 @@ witc summarize [path] [flags]
 | `--include-tests` | (bool) | off | Include `_test.go` files (excluded by default) |
 | `--exclude-generated` | (bool) | off | Skip Go files marked as generated |
 | `--no-progress` | (bool) | off | Disable the progress bar/spinner printed to stderr (auto-disabled when stderr isn't a terminal) |
-| `--verbose`, `-v` | (bool) | off | Log call-graph build phase timings and per-package counts to stderr (for diagnosing a slow type-checking phase) |
-| `--vv` | (bool) | off | Very verbose: also trace `go/packages` driver (`go list`) invocations and their timing |
+| `--verbose`, `-v` | (count) | off | Increase verbosity (repeatable). `-v` logs call-graph build phase timings and per-package counts to stderr; `-vv` also traces `go/packages` driver (`go list`) invocations and their timing |
 
 ### Common invocations
 

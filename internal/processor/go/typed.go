@@ -14,9 +14,17 @@ import (
 )
 
 // loadMode is the set of information BuildTypedCallGraph needs from go/packages:
-// syntax trees plus full type information for the loaded packages and their deps.
+// syntax trees and full type information for the analyzed module's own packages.
+//
+// Crucially it omits NeedDeps: we only ever inspect the syntax of the module's
+// packages, never a dependency's. Without NeedDeps, imported packages are
+// resolved from compiled export data rather than re-type-checked from source,
+// which is dramatically faster on large dependency trees (and on slow
+// filesystems such as a Windows drive mounted under WSL). Calls into imported
+// packages still resolve to a *types.Func with a correct package path, which is
+// all the call graph needs.
 const loadMode = packages.NeedName | packages.NeedFiles | packages.NeedSyntax |
-	packages.NeedTypes | packages.NeedTypesInfo | packages.NeedImports | packages.NeedDeps
+	packages.NeedTypes | packages.NeedTypesInfo | packages.NeedImports
 
 // BuildOptions controls diagnostic instrumentation for the typed call-graph
 // build. The zero value is silent and behaves exactly like the original build.
@@ -72,13 +80,13 @@ func BuildTypedCallGraphWithOptions(dir string, opts BuildOptions) (*CallGraph, 
 		return nil, fmt.Errorf("no Go packages found in %s", dir)
 	}
 
-	// Count every package reachable through imports — that's the full set the
-	// type-checker had to process, and it usually explains a slow load far better
-	// than the count of the module's own packages.
-	typeChecked := 0
-	packages.Visit(pkgs, func(*packages.Package) bool { typeChecked++; return true }, nil)
-	opts.logf("loaded %d module package(s), %d total incl. dependencies, in %s",
-		len(pkgs), typeChecked, time.Since(loadStart).Round(time.Millisecond))
+	// Count every package reachable through imports. These are now loaded from
+	// export data rather than type-checked from source, but the size of the
+	// import graph still indicates the scale of the load.
+	inGraph := 0
+	packages.Visit(pkgs, func(*packages.Package) bool { inGraph++; return true }, nil)
+	opts.logf("loaded %d module package(s) (%d in import graph) in %s",
+		len(pkgs), inGraph, time.Since(loadStart).Round(time.Millisecond))
 
 	if n := packages.PrintErrors(pkgs); n > 0 {
 		return nil, fmt.Errorf("%d package load/type error(s)", n)

@@ -88,23 +88,23 @@ declared functions and methods:
 | `--include-tests` | `false` | Include `_test.go` files |
 | `--exclude-generated` | `false` | Skip Go files marked as generated |
 | `--no-progress` | `false` | Disable the stderr progress bar/spinner (auto-off when stderr isn't a terminal) |
-| `--verbose`, `-v` | `false` | Log call-graph build phase timings and per-package counts to stderr |
-| `--vv` | `false` | Very verbose: also trace the `go/packages` driver (`go list`) invocations and timing |
+| `--verbose`, `-v` | `false` | Increase verbosity (repeatable). `-v` logs call-graph build phase timings and per-package counts to stderr; `-vv` also traces the `go/packages` driver (`go list`) invocations and timing |
 
 ### Debugging a slow build
 
-The call-graph step type-checks the whole dependency tree, so on a large repo it
-can dominate runtime. Use `-v` to see where the time goes — package load time and
-the total number of packages type-checked (including transitive dependencies):
+The call-graph step loads the module with full type information. Dependencies are
+read from compiled export data (not re-type-checked from source), so it stays fast
+even on large dependency trees and slow filesystems. Use `-v` to see where time
+goes — package load time and the size of the import graph:
 
 ```
 witc: loading packages from /path/to/repo ...
-witc: loaded 6 module package(s), 172 total incl. dependencies, in 346ms
+witc: loaded 6 module package(s) (172 in import graph) in 83ms
 witc:   walked .../internal/formatter: 4 file(s), +75 edge(s), +42 func node(s) in 0s
-witc: built call graph: 92 func node(s), 142 edge(s), 334 external call(s) in 0s
+witc: built call graph: 92 func node(s), 142 edge(s), 332 external call(s) in 0s
 ```
 
-For the most granular view, `--vv` additionally traces every underlying `go list`
+For the most granular view, `-vv` additionally traces every underlying `go list`
 invocation with its individual timing, so you can see which driver call is slow.
 
 ## Output sections

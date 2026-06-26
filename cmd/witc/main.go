@@ -23,8 +23,7 @@ var (
 	detail       string
 	maxTokens    int
 	noProgress   bool
-	verbose      bool
-	veryVerbose  bool
+	verbosity    int
 )
 
 func main() {
@@ -48,8 +47,7 @@ func main() {
 	summarizeCmd.Flags().StringVar(&detail, "detail", "high", "Output detail: low (API only), medium (+call graph, metrics), high (everything)")
 	summarizeCmd.Flags().IntVar(&maxTokens, "max-tokens", 0, "Cap estimated output size in tokens (0 = unlimited)")
 	summarizeCmd.Flags().BoolVar(&noProgress, "no-progress", false, "Disable progress output on stderr")
-	summarizeCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Log call-graph build phase timings and per-package counts to stderr")
-	summarizeCmd.Flags().BoolVar(&veryVerbose, "vv", false, "Very verbose: also trace go/packages driver (go list) invocations and timing")
+	summarizeCmd.Flags().CountVarP(&verbosity, "verbose", "v", "Increase verbosity (repeatable): -v logs call-graph build phase timings and per-package counts; -vv also traces go/packages driver (go list) invocations and timing")
 
 	rootCmd.AddCommand(summarizeCmd)
 
@@ -96,7 +94,8 @@ func runSummarize(cmd *cobra.Command, args []string) error {
 	// the output file; it auto-disables when stderr isn't an interactive terminal.
 	// Verbose modes print line-by-line diagnostics instead, so the animated
 	// spinner is suppressed to avoid the two clobbering each other.
-	verbose = verbose || veryVerbose
+	verbose := verbosity >= 1
+	veryVerbose := verbosity >= 2
 	rep := progress.New(os.Stderr, !noProgress && !verbose && progress.IsTerminal(os.Stderr))
 
 	ctx := context.Background()
