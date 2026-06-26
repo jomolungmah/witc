@@ -5,12 +5,12 @@ Fix the issue where `CallInfo.File` and `CallInfo.Line` are empty or zero when t
 
 ## Files to Modify
 
-### 1. `/home/magnus/work/ai-suite/witc/internal/processor/go/callgraph.go`
+### 1. `/home/magnus/work/jomolungmah/witc/internal/processor/go/callgraph.go`
 - Update `CallInfo` struct to include `ParentFunc` field
 - Modify `processCallExpr()` to accept parent function context
 - Ensure file/line information is preserved from the AST position
 
-### 2. `/home/magnus/work/ai-suite/witc/internal/processor/go/go.go`
+### 2. `/home/magnus/work/jomolungmah/witc/internal/processor/go/go.go`
 - Update `Process()` method to track current function during AST traversal
 - Pass parent function name to call visitor
 - Convert local `CallInfo` to `processor.CallInfo` with correct file paths

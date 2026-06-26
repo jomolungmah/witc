@@ -3,7 +3,7 @@ package goparser
 import (
 	"testing"
 
-	"github.com/ai-suite/witc/internal/processor"
+	"github.com/jomolungmah/witc/internal/processor"
 )
 
 func TestAggregate_MergesMultipleFiles(t *testing.T) {

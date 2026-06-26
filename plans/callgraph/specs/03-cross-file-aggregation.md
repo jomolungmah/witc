@@ -5,16 +5,16 @@ Build a package-level call graph by aggregating calls across all source files in
 
 ## Files to Create/Modify
 
-### 1. `/home/magnus/work/ai-suite/witc/internal/processor/go/callgraph_aggregate.go` (NEW)
+### 1. `/home/magnus/work/jomolungmah/witc/internal/processor/go/callgraph_aggregate.go` (NEW)
 - Implement `Aggregate()` function to combine call graphs from multiple results
 - Handle duplicate function names across files
 - Build cross-file caller/callee relationships
 
-### 2. `/home/magnus/work/ai-suite/witc/internal/formatter/markdown.go`
+### 2. `/home/magnus/work/jomolungmah/witc/internal/formatter/markdown.go`
 - Add call graph summary section showing cross-file dependencies
 - Display functions that span multiple files
 
-### 3. `/home/magnus/work/ai-suite/witc/internal/formatter/json.go`
+### 3. `/home/magnus/work/jomolungmah/witc/internal/formatter/json.go`
 - Ensure `CallGraph` is properly marshaled in JSON output
 - Consider adding aggregated statistics at package level
 
@@ -26,7 +26,7 @@ Build a package-level call graph by aggregating calls across all source files in
 package goparser
 
 import (
-    "github.com/ai-suite/witc/internal/processor"
+    "github.com/jomolungmah/witc/internal/processor"
 )
 
 // CallGraph represents a unified call graph across multiple files.

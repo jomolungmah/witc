@@ -1,4 +1,4 @@
-module github.com/ai-suite/witc
+module github.com/jomolungmah/witc
 
 go 1.25.0
 

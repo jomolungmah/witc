@@ -10,7 +10,7 @@ Guide for agentic coding assistants working on this repository.
 go build -o witc ./cmd/witc/main.go
 
 # Install globally
-go install github.com/ai-suite/witc/cmd/witc@latest
+go install github.com/jomolungmah/witc/cmd/witc@latest
 ```
 
 ### Test
@@ -73,7 +73,7 @@ govulncheck ./...
 ## Code Style Guidelines
 
 ### Imports
-- Use explicit import paths (full module path: `github.com/ai-suite/witc/...`)
+- Use explicit import paths (full module path: `github.com/jomolungmah/witc/...`)
 - Group imports: standard library first, then third-party, then local
 - Sort imports alphabetically within groups
 - Use blank imports only for `//go:build` directives and `init()` functions
@@ -82,7 +82,7 @@ govulncheck ./...
   import (
       "context"
       "fmt"
-      "github.com/ai-suite/witc/internal/formatter"
+      "github.com/jomolungmah/witc/internal/formatter"
       "github.com/spf13/cobra"
   )
   ```
@@ -166,7 +166,7 @@ govulncheck ./...
 - Test data in `testdata/` should not be scanned
 - All Go code must pass `go vet` before commit
 - The CLI entry point is at `cmd/witc/main.go`
-- Module path: `github.com/ai-suite/witc`
+- Module path: `github.com/jomolungmah/witc`
 - PRs should include test coverage updates
 - Documentation in block comments for public APIs
 - Use `context.Context` for all I/O operations

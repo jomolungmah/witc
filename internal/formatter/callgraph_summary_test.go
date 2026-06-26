@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	goparser "github.com/ai-suite/witc/internal/processor/go"
+	goparser "github.com/jomolungmah/witc/internal/processor/go"
 )
 
 // makeGraph builds a CallGraph from a caller -> callees adjacency map, wiring

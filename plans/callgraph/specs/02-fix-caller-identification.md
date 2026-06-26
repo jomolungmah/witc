@@ -5,12 +5,12 @@ Fix the issue where caller identification is incomplete or incorrect. Currently,
 
 ## Files to Modify
 
-### 1. `/home/magnus/work/ai-suite/witc/internal/processor/go/callgraph.go`
+### 1. `/home/magnus/work/jomolungmah/witc/internal/processor/go/callgraph.go`
 - Enhance `CallerName` extraction logic in `processCallExpr()`
 - Handle method receivers properly (e.g., `obj.Method()`)
 - Improve handling of anonymous function calls
 
-### 2. `/home/magnus/work/ai-suite/witc/internal/processor/go/go.go`
+### 2. `/home/magnus/work/jomolungmah/witc/internal/processor/go/go.go`
 - Update integration to use improved caller identification
 - Ensure consistent naming across different call types
 

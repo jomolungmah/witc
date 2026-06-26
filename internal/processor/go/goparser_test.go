@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ai-suite/witc/internal/processor"
+	"github.com/jomolungmah/witc/internal/processor"
 )
 
 func TestProcessor_Process(t *testing.T) {

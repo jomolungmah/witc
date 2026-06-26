@@ -6,10 +6,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/ai-suite/witc/internal/formatter"
-	"github.com/ai-suite/witc/internal/processor"
-	goparser "github.com/ai-suite/witc/internal/processor/go"
-	"github.com/ai-suite/witc/internal/scanner"
+	"github.com/jomolungmah/witc/internal/formatter"
+	"github.com/jomolungmah/witc/internal/processor"
+	goparser "github.com/jomolungmah/witc/internal/processor/go"
+	"github.com/jomolungmah/witc/internal/scanner"
 	"github.com/spf13/cobra"
 )
 

@@ -5,16 +5,16 @@ Implement comprehensive metrics analysis on the call graph to provide insights a
 
 ## Files to Create/Modify
 
-### 1. `/home/magnus/work/ai-suite/witc/internal/processor/go/callgraph_metrics.go` (NEW)
+### 1. `/home/magnus/work/jomolungmah/witc/internal/processor/go/callgraph_metrics.go` (NEW)
 - Implement metric calculation functions
 - Define metrics data structures
 - Calculate fan-in/fan-out, coupling, complexity estimates
 
-### 2. `/home/magnus/work/ai-suite/witc/internal/formatter/markdown.go`
+### 2. `/home/magnus/work/jomolungmah/witc/internal/formatter/markdown.go`
 - Add "Metrics" section to display calculated statistics
 - Format metrics in readable tables/lists
 
-### 3. `/home/magnus/work/ai-suite/witc/internal/formatter/json.go` (optional)
+### 3. `/home/magnus/work/jomolungmah/witc/internal/formatter/json.go` (optional)
 - Include metrics in JSON output if needed
 
 ## Detailed Implementation
@@ -25,7 +25,7 @@ Implement comprehensive metrics analysis on the call graph to provide insights a
 package goparser
 
 import (
-    "github.com/ai-suite/witc/internal/processor"
+    "github.com/jomolungmah/witc/internal/processor"
 )
 
 // Metrics contains various measurements about the codebase's call graph.

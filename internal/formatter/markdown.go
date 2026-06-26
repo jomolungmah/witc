@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ai-suite/witc/internal/processor"
-	goparser "github.com/ai-suite/witc/internal/processor/go"
+	"github.com/jomolungmah/witc/internal/processor"
+	goparser "github.com/jomolungmah/witc/internal/processor/go"
 )
 
 // stripFuncKeyword removes a leading "func" keyword from a stored signature so

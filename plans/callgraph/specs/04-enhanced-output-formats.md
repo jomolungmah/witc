@@ -5,16 +5,16 @@ Enhance both Markdown and JSON output formats to better display call graph infor
 
 ## Files to Modify
 
-### 1. `/home/magnus/work/ai-suite/witc/internal/formatter/markdown.go`
+### 1. `/home/magnus/work/jomolungmah/witc/internal/formatter/markdown.go`
 - Add "Call Graph" section after Packages section
 - Create function relationship table showing callers/callees
 - Highlight entry points and leaf functions
 
-### 2. `/home/magnus/work/ai-suite/witc/internal/formatter/json.go`
+### 2. `/home/magnus/work/jomolungmah/witc/internal/formatter/json.go`
 - Ensure `CallGraph` data is properly serialized
 - Add summary statistics object at top level
 
-### 3. `/home/magnus/work/ai-suite/witc/internal/formatter/formatter.go`
+### 3. `/home/magnus/work/jomolungmah/witc/internal/formatter/formatter.go`
 - Extend `Summary` struct to include call graph metadata if needed
 
 ## Detailed Changes
@@ -308,7 +308,7 @@ Test on witc project:
 ### JSON Example
 ```json
 {
-  "Root": "/home/magnus/work/ai-suite/witc",
+  "Root": "/home/magnus/work/jomolungmah/witc",
   "Packages": {
     ".": {
       "Package": "goparser",

@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	goparser "github.com/ai-suite/witc/internal/processor/go"
+	goparser "github.com/jomolungmah/witc/internal/processor/go"
 )
 
 // GenerateCallSummary creates a natural-language summary of the call graph,

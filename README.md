@@ -88,7 +88,7 @@ The JSON format emits the same information under a documented, versioned schema
 ## Installation
 
 ```bash
-go install github.com/ai-suite/witc/cmd/witc@latest
+go install github.com/jomolungmah/witc/cmd/witc@latest
 ```
 
 ## Skill

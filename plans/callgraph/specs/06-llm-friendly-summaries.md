@@ -5,12 +5,12 @@ Generate natural language summaries of call patterns and relationships that are 
 
 ## Files to Create/Modify
 
-### 1. `/home/magnus/work/ai-suite/witc/internal/formatter/callgraph_summary.go` (NEW)
+### 1. `/home/magnus/work/jomolungmah/witc/internal/formatter/callgraph_summary.go` (NEW)
 - Implement natural language generation for call patterns
 - Generate summaries of function relationships
 - Create "flow" descriptions showing how code executes
 
-### 2. `/home/magnus/work/ai-suite/witc/internal/formatter/markdown.go`
+### 2. `/home/magnus/work/jomolungmah/witc/internal/formatter/markdown.go`
 - Add "Call Flow Summary" section with natural language descriptions
 - Integrate generated summaries into existing output
 
@@ -22,7 +22,7 @@ Generate natural language summaries of call patterns and relationships that are 
 package formatter
 
 import (
-    "github.com/ai-suite/witc/internal/processor"
+    "github.com/jomolungmah/witc/internal/processor"
     "strings"
 )
 
@@ -187,7 +187,7 @@ func generateFunctionSummary(funcName string, calls []processor.CallInfo) string
     // Add context about call location
     if len(calls) > 0 {
         loc := calls[0]
-        file := strings.TrimPrefix(loc.File, "/home/magnus/work/ai-suite/witc/")
+        file := strings.TrimPrefix(loc.File, "/home/magnus/work/jomolungmah/witc/")
         b.WriteString(" (called at `")
         b.WriteString(file)
         b.WriteString(":")

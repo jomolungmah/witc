@@ -3,7 +3,7 @@ package goparser
 import (
 	"sort"
 
-	"github.com/ai-suite/witc/internal/processor"
+	"github.com/jomolungmah/witc/internal/processor"
 )
 
 // Metrics contains various measurements about the codebase's call graph.

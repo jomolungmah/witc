@@ -3,7 +3,7 @@ package goparser
 import (
 	"fmt"
 
-	"github.com/ai-suite/witc/internal/processor"
+	"github.com/jomolungmah/witc/internal/processor"
 )
 
 // CallGraph represents a unified call graph across multiple files.

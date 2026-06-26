@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/ai-suite/witc/internal/processor"
+	"github.com/jomolungmah/witc/internal/processor"
 	"go/ast"
 	"go/doc"
 	"go/parser"

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"sort"
 
-	goparser "github.com/ai-suite/witc/internal/processor/go"
+	goparser "github.com/jomolungmah/witc/internal/processor/go"
 )
 
 // SchemaVersion identifies the JSON output schema. It is bumped when the shape
