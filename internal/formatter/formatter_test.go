@@ -53,6 +53,69 @@ func TestMarkdown(t *testing.T) {
 	}
 }
 
+func TestMarkdown_MethodRenderingNoDoubleFunc(t *testing.T) {
+	sum := &Summary{
+		Root: "/tmp/example",
+		Packages: map[string]*processor.Result{
+			"pkg": {
+				Package: "pkg",
+				Structs: []processor.Struct{
+					{
+						Name: "Foo",
+						Methods: []processor.Method{
+							{Receiver: "*Foo", Name: "Bar", Signature: "func() int"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	out, err := Markdown(sum)
+	if err != nil {
+		t.Fatalf("Markdown: %v", err)
+	}
+	if !strings.Contains(out, "func (*Foo) Bar() int") {
+		t.Errorf("expected clean method signature, got:\n%s", out)
+	}
+	if strings.Contains(out, "Bar func(") {
+		t.Errorf("method rendering should not contain double 'func', got:\n%s", out)
+	}
+}
+
+func TestMarkdown_ShowsOutgoingCalls(t *testing.T) {
+	sum := &Summary{
+		Root: "/tmp/example",
+		Packages: map[string]*processor.Result{
+			"pkg": {
+				Package: "pkg",
+				Functions: []processor.Function{
+					{Name: "Caller", Signature: "func()"},
+					{Name: "callee", Signature: "func()"},
+				},
+				// Keyed by callee; Caller calls callee at p.go:3.
+				CallGraph: map[string][]processor.CallInfo{
+					"callee": {{CalleeName: "callee", File: "p.go", Line: 3, ParentFunc: "Caller"}},
+				},
+			},
+		},
+	}
+
+	out, err := Markdown(sum)
+	if err != nil {
+		t.Fatalf("Markdown: %v", err)
+	}
+	// The outgoing call must be listed under Caller, pointing at callee.
+	callerIdx := strings.Index(out, "func Caller()")
+	calleeRef := strings.Index(out, "`callee` (at p.go:3)")
+	if callerIdx < 0 || calleeRef < 0 {
+		t.Fatalf("expected Caller to list outgoing call to callee, got:\n%s", out)
+	}
+	if calleeRef < callerIdx {
+		t.Errorf("outgoing call should appear under Caller, got:\n%s", out)
+	}
+}
+
 func TestJSON(t *testing.T) {
 	sum := &Summary{
 		Root:  "/tmp/example",

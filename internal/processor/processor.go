@@ -15,4 +15,5 @@ type Result struct {
 	Structs    []Struct
 	Interfaces []Interface
 	Functions  []Function
+	CallGraph  map[string][]CallInfo // callee -> callers
 }

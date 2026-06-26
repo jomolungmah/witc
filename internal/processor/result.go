@@ -31,3 +31,13 @@ type Field struct {
 	Name string
 	Type string
 }
+
+// CallInfo contains information about a function call.
+type CallInfo struct {
+	CallerName string // The name of the code that makes the call (e.g., "append")
+	CalleeName string // The name/function being called
+	File       string // Source file path where call occurs
+	Line       int    // Line number in source
+	Column     int    // Column number in source
+	ParentFunc string // Name of function/method containing this call (e.g., "Process")
+}

@@ -14,10 +14,11 @@ import (
 )
 
 var (
-	outputFile    string
-	format        string
-	noStructure   bool
-	excludeGen    bool
+	outputFile   string
+	format       string
+	noStructure  bool
+	excludeGen   bool
+	excludeTests bool
 )
 
 func main() {
@@ -37,6 +38,7 @@ func main() {
 	summarizeCmd.Flags().StringVar(&format, "format", "markdown", "Output format: markdown, json")
 	summarizeCmd.Flags().BoolVar(&noStructure, "no-structure", false, "Omit file structure, output API surface only")
 	summarizeCmd.Flags().BoolVar(&excludeGen, "exclude-generated", false, "Skip generated Go files")
+	summarizeCmd.Flags().BoolVar(&excludeTests, "exclude-tests", false, "Exclude test functions from output")
 
 	rootCmd.AddCommand(summarizeCmd)
 
@@ -69,7 +71,7 @@ func runSummarize(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("scan: %w", err)
 	}
 
-	proc := goparser.Processor{ExcludeGenerated: excludeGen}
+	proc := goparser.Processor{ExcludeGenerated: excludeGen, ExcludeTests: excludeTests}
 	sum := &formatter.Summary{
 		Root:        root,
 		Paths:       make([]string, 0, len(files)),
@@ -99,6 +101,12 @@ func runSummarize(cmd *cobra.Command, args []string) error {
 			sum.Packages[pkgPath] = result
 		}
 	}
+
+	var results []*processor.Result
+	for _, r := range sum.Packages {
+		results = append(results, r)
+	}
+	sum.CallGraph = goparser.Aggregate(results)
 
 	var out string
 	switch format {

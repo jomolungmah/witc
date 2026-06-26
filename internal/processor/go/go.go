@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"path/filepath"
+	"strings"
 
 	"github.com/ai-suite/witc/internal/processor"
 	"go/ast"
@@ -15,6 +16,7 @@ import (
 // Processor implements processor.Processor for Go source files.
 type Processor struct {
 	ExcludeGenerated bool
+	ExcludeTests     bool
 }
 
 // Supports returns true for .go extension.
@@ -96,6 +98,10 @@ func (p *Processor) Process(ctx context.Context, path string, src []byte) (*proc
 			}
 			return false
 		case *ast.FuncDecl:
+			if p.ExcludeTests && isTestFunction(x) {
+				return true
+			}
+
 			sig := formatFuncType(fset, x.Type)
 			if x.Recv != nil {
 				recv := formatRecv(fset, x.Recv)
@@ -122,6 +128,65 @@ func (p *Processor) Process(ctx context.Context, path string, src []byte) (*proc
 		return true
 	})
 
+	// Map imported package identifiers to their import paths so the call
+	// visitor can tell standard-library calls from local/third-party ones.
+	imports := make(map[string]string)
+	for _, imp := range f.Imports {
+		path := strings.Trim(imp.Path.Value, `"`)
+		name := path
+		if imp.Name != nil {
+			name = imp.Name.Name
+		} else if i := strings.LastIndexByte(path, '/'); i >= 0 {
+			name = path[i+1:]
+		}
+		imports[name] = path
+	}
+
+	// Collect call graph with parent function tracking
+	var localCalls map[string][]CallInfo = make(map[string][]CallInfo)
+
+	for _, decl := range f.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok {
+			if fn.Body == nil {
+				continue
+			}
+			currentFunc := fn.Name.Name
+
+			// Create a visitor for this function body with the same fileset
+			funcVisitor := NewCallVisitorWithFileSet(fset)
+			funcVisitor.imports = imports
+
+			// Walk the function body with context
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				if callExpr, ok := n.(*ast.CallExpr); ok {
+					funcVisitor.processCallExpr(callExpr, currentFunc)
+				}
+				return true
+			})
+
+			// Merge calls into local map
+			for callee, calls := range funcVisitor.Calls {
+				localCalls[callee] = append(localCalls[callee], calls...)
+			}
+		}
+	}
+
+	// Convert to processor.CallInfo and set on result
+	result.CallGraph = make(map[string][]processor.CallInfo)
+	for callee, calls := range localCalls {
+		result.CallGraph[callee] = make([]processor.CallInfo, len(calls))
+		for i, c := range calls {
+			result.CallGraph[callee][i] = processor.CallInfo{
+				CallerName: c.CallerName,
+				CalleeName: c.CalleeName,
+				File:       filepath.Base(c.File), // Use just filename for cleaner output
+				Line:       c.Line,
+				Column:     c.Column,
+				ParentFunc: c.ParentFunc,
+			}
+		}
+	}
+
 	return result, nil
 }
 
@@ -136,35 +201,47 @@ func formatExpr(fset *token.FileSet, expr ast.Expr) string {
 
 func formatFuncType(fset *token.FileSet, ft *ast.FuncType) string {
 	if ft == nil {
-		return ""
+		return "func()"
 	}
 	var buf bytes.Buffer
 	buf.WriteString("func(")
-	if ft.Params != nil {
-		for i, p := range ft.Params.List {
-			if i > 0 {
-				buf.WriteString(", ")
-			}
-			buf.WriteString(formatExpr(fset, p.Type))
-		}
-	}
+	buf.WriteString(formatFieldList(fset, ft.Params))
 	buf.WriteString(")")
 	if ft.Results != nil && len(ft.Results.List) > 0 {
 		buf.WriteString(" ")
-		if len(ft.Results.List) == 1 && len(ft.Results.List[0].Names) == 0 {
-			buf.WriteString(formatExpr(fset, ft.Results.List[0].Type))
-		} else {
+		// Parenthesize when there are multiple results or any are named.
+		parens := len(ft.Results.List) > 1 || len(ft.Results.List[0].Names) > 0
+		if parens {
 			buf.WriteString("(")
-			for i, r := range ft.Results.List {
-				if i > 0 {
-					buf.WriteString(", ")
-				}
-				buf.WriteString(formatExpr(fset, r.Type))
-			}
+		}
+		buf.WriteString(formatFieldList(fset, ft.Results))
+		if parens {
 			buf.WriteString(")")
 		}
 	}
 	return buf.String()
+}
+
+// formatFieldList renders a parameter or result list, preserving names and
+// expanding grouped fields (e.g. "dst, src *T") so the arity is accurate.
+func formatFieldList(fset *token.FileSet, fl *ast.FieldList) string {
+	if fl == nil || len(fl.List) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(fl.List))
+	for _, f := range fl.List {
+		typ := formatExpr(fset, f.Type)
+		if len(f.Names) == 0 {
+			parts = append(parts, typ)
+			continue
+		}
+		names := make([]string, len(f.Names))
+		for i, n := range f.Names {
+			names[i] = n.Name
+		}
+		parts = append(parts, strings.Join(names, ", ")+" "+typ)
+	}
+	return strings.Join(parts, ", ")
 }
 
 func formatRecv(fset *token.FileSet, recv *ast.FieldList) string {
@@ -180,4 +257,30 @@ func baseType(recv string) string {
 		return recv[1:]
 	}
 	return recv
+}
+
+// isTestFunction checks if a function declaration is a test function.
+// Test functions start with "Test" and have at least one parameter of type "*testing.T".
+func isTestFunction(fn *ast.FuncDecl) bool {
+	if len(fn.Name.Name) < 4 || fn.Name.Name[:4] != "Test" {
+		return false
+	}
+
+	if fn.Type.Params == nil || len(fn.Type.Params.List) == 0 {
+		return false
+	}
+
+	for _, param := range fn.Type.Params.List {
+		if starExpr, ok := param.Type.(*ast.StarExpr); ok {
+			if selExpr, ok := starExpr.X.(*ast.SelectorExpr); ok {
+				if ident, ok := selExpr.X.(*ast.Ident); ok {
+					if ident.Name == "testing" && selExpr.Sel.Name == "T" {
+						return true
+					}
+				}
+			}
+		}
+	}
+
+	return false
 }

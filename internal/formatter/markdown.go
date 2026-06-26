@@ -5,7 +5,35 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/ai-suite/witc/internal/processor"
+	goparser "github.com/ai-suite/witc/internal/processor/go"
 )
+
+// stripFuncKeyword removes a leading "func" keyword from a stored signature so
+// method and interface renderings don't read "func ... func(...)".
+func stripFuncKeyword(sig string) string {
+	return strings.TrimPrefix(sig, "func")
+}
+
+// writeCalls renders the outgoing calls of a single function, indented under it.
+func writeCalls(b *strings.Builder, calls []processor.CallInfo, indent string) {
+	if len(calls) == 0 {
+		return
+	}
+	sorted := append([]processor.CallInfo(nil), calls...)
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i].Line != sorted[j].Line {
+			return sorted[i].Line < sorted[j].Line
+		}
+		return sorted[i].CalleeName < sorted[j].CalleeName
+	})
+	b.WriteString(indent + "Calls:\n")
+	for _, call := range sorted {
+		loc := fmt.Sprintf("%s:%d", filepath.Base(call.File), call.Line)
+		b.WriteString(fmt.Sprintf("%s  - `%s` (at %s)\n", indent, call.CalleeName, loc))
+	}
+}
 
 // Markdown formats the summary as markdown.
 func Markdown(sum *Summary) (string, error) {
@@ -35,6 +63,9 @@ func Markdown(sum *Summary) (string, error) {
 		}
 		b.WriteString(fmt.Sprintf("### %s\n\n", pkg))
 
+		// outgoing maps each function/method in this package to the calls it makes.
+		outgoing := outgoingCalls(r.CallGraph)
+
 		for _, s := range r.Structs {
 			// Struct with fields summary
 			if len(s.Fields) > 0 {
@@ -51,7 +82,8 @@ func Markdown(sum *Summary) (string, error) {
 				b.WriteString(fmt.Sprintf("- `type %s struct`\n", s.Name))
 			}
 			for _, m := range s.Methods {
-				b.WriteString(fmt.Sprintf("  - `func (%s) %s %s`\n", m.Receiver, m.Name, m.Signature))
+				b.WriteString(fmt.Sprintf("  - `func (%s) %s%s`\n", m.Receiver, m.Name, stripFuncKeyword(m.Signature)))
+				writeCalls(&b, outgoing[m.Name], "    ")
 			}
 		}
 
@@ -60,7 +92,7 @@ func Markdown(sum *Summary) (string, error) {
 				methStrs := make([]string, 0, len(iface.Methods))
 				for _, m := range iface.Methods {
 					if m.Name != "" {
-						methStrs = append(methStrs, m.Name+" "+m.Signature)
+						methStrs = append(methStrs, m.Name+stripFuncKeyword(m.Signature))
 					} else {
 						methStrs = append(methStrs, m.Signature)
 					}
@@ -79,12 +111,196 @@ func Markdown(sum *Summary) (string, error) {
 				sig = "func " + fn.Name + " " + sig
 			}
 			b.WriteString(fmt.Sprintf("- `%s`\n", sig))
+
+			writeCalls(&b, outgoing[fn.Name], "  ")
 		}
 
 		b.WriteString("\n")
 	}
 
+	// Add Call Graph section after Packages
+	b.WriteString("\n## Call Graph\n\n")
+
+	if sum.CallGraph != nil && len(sum.CallGraph.Functions) > 0 {
+		b.WriteString("### Function Relationships\n\n")
+		b.WriteString("| Function | Calls | Called By |\n")
+		b.WriteString("|----------|-------|-----------|\n")
+
+		funcNames := make([]string, 0, len(sum.CallGraph.Functions))
+		for name := range sum.CallGraph.Functions {
+			funcNames = append(funcNames, name)
+		}
+		sort.Strings(funcNames)
+
+		for _, funcName := range funcNames {
+			callList := sum.CallGraph.Functions[funcName]
+			callerMap := make(map[string]bool)
+			for _, c := range callList.Callers {
+				callerMap[c.Name] = true
+			}
+			callers := make([]string, 0, len(callerMap))
+			for name := range callerMap {
+				callers = append(callers, name)
+			}
+			sort.Strings(callers)
+
+			callersStr := strings.Join(callers, ", ")
+			b.WriteString(fmt.Sprintf("| `%s` | %d | %s |\n", funcName, len(callList.Callees), callersStr))
+		}
+
+		b.WriteString("\n### Entry Points\n\n")
+		entryPoints := findEntryPoints(sum.CallGraph)
+		if len(entryPoints) > 0 {
+			for _, ep := range entryPoints {
+				b.WriteString(fmt.Sprintf("- `%s`\n", ep))
+			}
+		} else {
+			b.WriteString("_No clear entry points detected_\n")
+		}
+
+		b.WriteString("\n### Leaf Functions\n\n")
+		leafFuncs := findLeafFunctions(sum.CallGraph)
+		if len(leafFuncs) > 0 {
+			for _, lf := range leafFuncs {
+				b.WriteString(fmt.Sprintf("- `%s`\n", lf))
+			}
+		} else {
+			b.WriteString("_No leaf functions detected_\n")
+		}
+
+		b.WriteString("\n### Cross-File Dependencies\n\n")
+		showCrossFileDeps(&b, sum.CallGraph)
+	} else {
+		b.WriteString("*No call graph data available*\n")
+	}
+
+	b.WriteString("\n## Metrics\n\n")
+
+	if sum.CallGraph != nil && len(sum.CallGraph.Functions) > 0 {
+		metrics := goparser.CalculateMetrics(sum.CallGraph)
+
+		if metrics.TotalFunctions > 0 {
+			b.WriteString("### Overview\n\n")
+			b.WriteString(fmt.Sprintf("- **Total Functions:** %d\n", metrics.TotalFunctions))
+			b.WriteString(fmt.Sprintf("- **Total Calls:** %d\n", metrics.TotalCalls))
+			b.WriteString(fmt.Sprintf("- **Average Callees per Function:** %.2f\n", metrics.AvgCalleesPerFunc))
+
+			if metrics.TotalCalls > 0 {
+				externalPct := float64(metrics.ExternalCalls) / float64(metrics.TotalCalls) * 100
+				b.WriteString(fmt.Sprintf("- **External Calls:** %d (%.1f%%)\n", metrics.ExternalCalls, externalPct))
+			}
+
+			if metrics.MaxFanIn != "" {
+				fanInCount := getFunctionCallerCount(sum.CallGraph, metrics.MaxFanIn)
+				b.WriteString(fmt.Sprintf("- **Most Called Function:** `%s` (called by %d functions)\n",
+					metrics.MaxFanIn, fanInCount))
+			}
+
+			if metrics.MaxFanOut != "" {
+				fanOutCount := len(sum.CallGraph.Functions[metrics.MaxFanOut].Callees)
+				b.WriteString(fmt.Sprintf("- **Highest Fan-out:** `%s` (calls %d other functions)\n",
+					metrics.MaxFanOut, fanOutCount))
+			}
+
+			if len(metrics.HighCouplingFuncs) > 0 {
+				b.WriteString("\n### High Coupling Functions\n\n")
+				b.WriteString("Functions with many dependencies (may indicate refactoring opportunities):\n\n")
+				displayCount := len(metrics.HighCouplingFuncs)
+				if displayCount > 10 {
+					displayCount = 10
+				}
+				for _, fn := range metrics.HighCouplingFuncs[:displayCount] {
+					b.WriteString(fmt.Sprintf("- `%s`\n", fn))
+				}
+			}
+		} else {
+			b.WriteString("*No metrics available*\n")
+		}
+	} else {
+		b.WriteString("*No call graph data available*\n")
+	}
+
+	b.WriteString(GenerateCallSummary(sum.Packages, sum.CallGraph))
+	b.WriteString(GenerateDependencyMap(sum.Packages))
+
+	for _, pkg := range sum.Packages {
+		if pkg != nil {
+			for _, fn := range pkg.Functions {
+				if fn.Name == "main" || isExported(fn.Name) {
+					b.WriteString(GenerateCallFlow(fn.Name, sum.Packages))
+				}
+			}
+		}
+	}
+
 	return b.String(), nil
+}
+
+func findEntryPoints(cg *goparser.CallGraph) []string {
+	var entries []string
+	for funcName := range cg.Functions {
+		if isExported(funcName) || funcName == "main" {
+			entries = append(entries, funcName)
+		}
+	}
+	entries = deduplicateStrings(entries)
+	sort.Strings(entries)
+	return entries
+}
+
+func findLeafFunctions(cg *goparser.CallGraph) []string {
+	var leaves []string
+	for funcName := range cg.Functions {
+		if len(cg.Functions[funcName].Callees) == 0 {
+			leaves = append(leaves, funcName)
+		}
+	}
+	leaves = deduplicateStrings(leaves)
+	sort.Strings(leaves)
+	return leaves
+}
+
+func showCrossFileDeps(b *strings.Builder, cg *goparser.CallGraph) {
+	hasCrossFile := false
+
+	for callee := range cg.Functions {
+		filesForCallee := make(map[string]bool)
+		for _, callerInfo := range cg.Functions {
+			for _, caller := range callerInfo.Callers {
+				if caller.Name == callee {
+					filesForCallee[caller.File] = true
+				}
+			}
+		}
+
+		if len(filesForCallee) > 1 {
+			hasCrossFile = true
+			break
+		}
+	}
+
+	if hasCrossFile {
+		b.WriteString("Functions called from multiple files:\n\n")
+		for callee := range cg.Functions {
+			files := make(map[string]bool)
+			for _, callerInfo := range cg.Functions {
+				for _, caller := range callerInfo.Callers {
+					if caller.Name == callee {
+						files[caller.File] = true
+					}
+				}
+			}
+
+			if len(files) > 1 {
+				b.WriteString(fmt.Sprintf("- `%s` (called from %d files)\n", callee, len(files)))
+				for f := range files {
+					b.WriteString(fmt.Sprintf("  - `%s`\n", filepath.Base(f)))
+				}
+			}
+		}
+	} else {
+		b.WriteString("_No cross-file dependencies detected_\n")
+	}
 }
 
 func treeFromPaths(paths []string) string {
@@ -101,4 +317,45 @@ func treeFromPaths(paths []string) string {
 		b.WriteString(prefix + p + "\n")
 	}
 	return b.String()
+}
+
+func isExported(name string) bool {
+	if len(name) == 0 {
+		return false
+	}
+	return name[0] >= 'A' && name[0] <= 'Z'
+}
+
+func deduplicateStrings(s []string) []string {
+	seen := make(map[string]bool)
+	var result []string
+
+	for _, str := range s {
+		if !seen[str] {
+			seen[str] = true
+			result = append(result, str)
+		}
+	}
+
+	return result
+}
+
+func getFunctionCallerCount(cg *goparser.CallGraph, funcName string) int {
+	if cg == nil || cg.Functions == nil {
+		return 0
+	}
+
+	count := 0
+	for _, info := range cg.Functions {
+		if info == nil {
+			continue
+		}
+		for _, caller := range info.Callers {
+			if caller.Name == funcName {
+				count++
+			}
+		}
+	}
+
+	return count
 }

@@ -15,10 +15,10 @@ type File struct {
 
 // skipDirs are directory names to skip when walking.
 var skipDirs = map[string]bool{
-	"vendor":      true,
+	"vendor":       true,
 	"node_modules": true,
-	".git":        true,
-	"testdata":    true,
+	".git":         true,
+	"testdata":     true,
 }
 
 // Scan walks the directory tree and returns discovered source files.
