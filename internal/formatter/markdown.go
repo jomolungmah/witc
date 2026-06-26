@@ -95,6 +95,7 @@ func Markdown(sum *Summary) (string, error) {
 	candidates := []section{
 		{0, header},
 		{2, structureSection(sum)},
+		{2, architectureSection(sum)},
 		{1, apiSection(sum, includeInlineCalls, detail != detailHigh, apiBudget)},
 		{3, callGraphSection(sum.CallGraph)},
 		{4, metricsSection(sum.CallGraph)},
@@ -164,6 +165,116 @@ func trimToBudget(secs []section, maxTokens int) []section {
 		}
 		secs = append(secs[:victim], secs[victim+1:]...)
 	}
+}
+
+// architectureSection gives a high-altitude map of the module: entry points and
+// a per-package line with its doc, symbol counts, and the in-module packages it
+// depends on (calls into). Package dependencies are derived from the typed call
+// graph; docs and counts come from the per-file API surface.
+func architectureSection(sum *Summary) string {
+	if len(sum.Packages) == 0 {
+		return ""
+	}
+
+	relKeys := make([]string, 0, len(sum.Packages))
+	for k := range sum.Packages {
+		relKeys = append(relKeys, k)
+	}
+	sort.Strings(relKeys)
+
+	fullToRel := pkgPathMap(sum.CallGraph, relKeys)
+	relToFull := make(map[string]string, len(fullToRel))
+	for full, rel := range fullToRel {
+		relToFull[rel] = full
+	}
+	deps := internalPackageDeps(sum.CallGraph)
+
+	var b strings.Builder
+	b.WriteString("## Architecture\n\n")
+
+	if sum.CallGraph != nil {
+		if eps := entryPointNames(sum.CallGraph); len(eps) > 0 {
+			b.WriteString("Entry points: " + joinCode(capStrings(eps, 10)) + "\n\n")
+		}
+	}
+
+	for _, rel := range relKeys {
+		r := sum.Packages[rel]
+		if r == nil {
+			continue
+		}
+		b.WriteString("- `" + rel + "`")
+		if r.Doc != "" {
+			b.WriteString(" — _" + r.Doc + "_")
+		}
+		b.WriteString(fmt.Sprintf(" (%d type(s), %d func(s))", len(r.Structs)+len(r.Interfaces), len(r.Functions)))
+
+		if full := relToFull[rel]; full != "" {
+			var depRels []string
+			for dep := range deps[full] {
+				if dr := fullToRel[dep]; dr != "" {
+					depRels = append(depRels, dr)
+				}
+			}
+			if len(depRels) > 0 {
+				sort.Strings(depRels)
+				b.WriteString(" → depends on: " + joinCode(depRels))
+			}
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+// internalPackageDeps derives in-module package → package edges from the call
+// graph: a function calling into another module package creates a dependency.
+func internalPackageDeps(cg *goparser.CallGraph) map[string]map[string]bool {
+	deps := make(map[string]map[string]bool)
+	if cg == nil {
+		return deps
+	}
+	for _, info := range cg.Functions {
+		from := info.Package
+		for _, callee := range info.Callees {
+			target := cg.Functions[callee.Name]
+			if target == nil || target.Package == "" || target.Package == from {
+				continue
+			}
+			if deps[from] == nil {
+				deps[from] = make(map[string]bool)
+			}
+			deps[from][target.Package] = true
+		}
+	}
+	return deps
+}
+
+// pkgPathMap maps each full import path in the call graph to the matching
+// display path used by the API surface (e.g. the module-relative directory).
+func pkgPathMap(cg *goparser.CallGraph, relKeys []string) map[string]string {
+	m := make(map[string]string)
+	if cg == nil {
+		return m
+	}
+	for _, info := range cg.Functions {
+		full := info.Package
+		if full == "" || m[full] != "" {
+			continue
+		}
+		best := ""
+		for _, rel := range relKeys {
+			if full == rel || strings.HasSuffix(full, "/"+rel) {
+				if len(rel) > len(best) {
+					best = rel
+				}
+			}
+		}
+		if best != "" {
+			m[full] = best
+		}
+	}
+	return m
 }
 
 func structureSection(sum *Summary) string {

@@ -229,6 +229,42 @@ func TestMarkdown_SelectivityAndCollapse(t *testing.T) {
 	}
 }
 
+func TestMarkdown_ArchitectureSection(t *testing.T) {
+	sum := &Summary{
+		Root: "/x",
+		Packages: map[string]*processor.Result{
+			"cmd/app":      {Package: "main", Doc: "Command app does things.", Functions: []processor.Function{{Name: "main", Signature: "func()"}}},
+			"internal/svc": {Package: "svc", Structs: []processor.Struct{{Name: "S"}}},
+		},
+		CallGraph: &goparser.CallGraph{Functions: map[string]*goparser.FuncInfo{
+			"main.main": {Name: "main.main", Package: "example.com/m/cmd/app", Callees: []goparser.Callee{{Name: "svc.Do"}}},
+			"svc.Do":    {Name: "svc.Do", Package: "example.com/m/internal/svc", Callers: []goparser.Caller{{Name: "main.main"}}},
+		}},
+	}
+
+	sum.Detail = detailHigh
+	out, _ := Markdown(sum)
+	if !strings.Contains(out, "## Architecture") {
+		t.Fatal("expected Architecture section")
+	}
+	if !strings.Contains(out, "Command app does things.") {
+		t.Error("expected package doc in architecture line")
+	}
+	if !strings.Contains(out, "depends on: `internal/svc`") {
+		t.Errorf("expected package dependency edge, got:\n%s", out)
+	}
+	// Architecture must precede the per-package detail.
+	if strings.Index(out, "## Architecture") > strings.Index(out, "## Packages") {
+		t.Error("architecture should appear before the Packages section")
+	}
+
+	sum.Detail = detailLow
+	low, _ := Markdown(sum)
+	if strings.Contains(low, "## Architecture") {
+		t.Error("low detail should omit the architecture section")
+	}
+}
+
 func TestJSON(t *testing.T) {
 	sum := &Summary{
 		Root:  "/tmp/example",
