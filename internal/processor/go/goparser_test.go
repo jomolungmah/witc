@@ -3,6 +3,8 @@ package goparser
 import (
 	"context"
 	"testing"
+
+	"github.com/ai-suite/witc/internal/processor"
 )
 
 func TestProcessor_Process(t *testing.T) {
@@ -112,6 +114,80 @@ func helper() {}
 	if calls[0].ParentFunc != "Run" {
 		t.Errorf("helper ParentFunc = %q, want Run", calls[0].ParentFunc)
 	}
+}
+
+func TestProcess_ExtractsDocComments(t *testing.T) {
+	src := `// Package widget does widget things.
+package widget
+
+// Thing is a thing. It has more detail on a second sentence.
+type Thing struct {
+	Name string
+}
+
+// Do performs the thing.
+func (t *Thing) Do() {}
+
+// Reader reads things.
+type Reader interface {
+	Read() error
+}
+
+// New builds a Thing.
+func New() *Thing { return nil }
+`
+	proc := Processor{}
+	result, err := proc.Process(context.Background(), "widget/widget.go", []byte(src))
+	if err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+
+	if result.Doc != "Package widget does widget things." {
+		t.Errorf("package doc = %q", result.Doc)
+	}
+
+	// Synopsis keeps only the first sentence.
+	if len(result.Structs) == 0 || result.Structs[0].Doc != "Thing is a thing." {
+		t.Errorf("struct doc = %q, want first sentence only", structDoc(result))
+	}
+	var method processor.Method
+	for _, s := range result.Structs {
+		for _, m := range s.Methods {
+			if m.Name == "Do" {
+				method = m
+			}
+		}
+	}
+	if method.Doc != "Do performs the thing." {
+		t.Errorf("method doc = %q", method.Doc)
+	}
+	if len(result.Interfaces) == 0 || result.Interfaces[0].Doc != "Reader reads things." {
+		t.Errorf("interface doc = %q", ifaceDoc(result))
+	}
+	if len(result.Functions) == 0 || result.Functions[0].Doc != "New builds a Thing." {
+		t.Errorf("function doc = %q", fnDoc(result))
+	}
+}
+
+func structDoc(r *processor.Result) string {
+	if len(r.Structs) > 0 {
+		return r.Structs[0].Doc
+	}
+	return ""
+}
+
+func ifaceDoc(r *processor.Result) string {
+	if len(r.Interfaces) > 0 {
+		return r.Interfaces[0].Doc
+	}
+	return ""
+}
+
+func fnDoc(r *processor.Result) string {
+	if len(r.Functions) > 0 {
+		return r.Functions[0].Doc
+	}
+	return ""
 }
 
 func TestProcessor_ExcludeGenerated(t *testing.T) {

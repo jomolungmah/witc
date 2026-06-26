@@ -3,6 +3,7 @@ package processor
 // Struct represents a struct type.
 type Struct struct {
 	Name    string
+	Doc     string // first sentence of the doc comment, if any
 	Fields  []Field
 	Methods []Method
 }
@@ -10,12 +11,14 @@ type Struct struct {
 // Interface represents an interface type.
 type Interface struct {
 	Name    string
+	Doc     string // first sentence of the doc comment, if any
 	Methods []Method
 }
 
 // Function represents a top-level function.
 type Function struct {
 	Name      string
+	Doc       string // first sentence of the doc comment, if any
 	Signature string
 }
 
@@ -23,6 +26,7 @@ type Function struct {
 type Method struct {
 	Receiver  string
 	Name      string
+	Doc       string // first sentence of the doc comment, if any
 	Signature string
 }
 

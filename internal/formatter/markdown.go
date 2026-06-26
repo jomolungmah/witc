@@ -15,6 +15,14 @@ func stripFuncKeyword(sig string) string {
 	return strings.TrimPrefix(sig, "func")
 }
 
+// writeDoc renders a one-line doc comment in italics at the given indent.
+func writeDoc(b *strings.Builder, doc, indent string) {
+	if doc == "" {
+		return
+	}
+	b.WriteString(indent + "_" + doc + "_\n")
+}
+
 // writeTypedCalls renders a function's internal callees inline, looked up in the
 // type-checked graph by its qualified name (e.g. "pkg.Fn" or "pkg.(*T).M").
 // It renders nothing when the name isn't a node (e.g. under the AST fallback).
@@ -53,6 +61,9 @@ func Markdown(sum *Summary) (string, error) {
 			continue
 		}
 		b.WriteString(fmt.Sprintf("### %s\n\n", pkg))
+		if r.Doc != "" {
+			b.WriteString("_" + r.Doc + "_\n\n")
+		}
 
 		for _, s := range r.Structs {
 			// Struct with fields summary
@@ -69,8 +80,12 @@ func Markdown(sum *Summary) (string, error) {
 			} else if len(s.Methods) > 0 {
 				b.WriteString(fmt.Sprintf("- `type %s struct`\n", s.Name))
 			}
+			if len(s.Fields) > 0 || len(s.Methods) > 0 {
+				writeDoc(&b, s.Doc, "  ")
+			}
 			for _, m := range s.Methods {
 				b.WriteString(fmt.Sprintf("  - `func (%s) %s%s`\n", m.Receiver, m.Name, stripFuncKeyword(m.Signature)))
+				writeDoc(&b, m.Doc, "    ")
 				qualified := r.Package + ".(" + m.Receiver + ")." + m.Name
 				writeTypedCalls(&b, sum.CallGraph, qualified, "    ")
 			}
@@ -90,6 +105,7 @@ func Markdown(sum *Summary) (string, error) {
 			} else {
 				b.WriteString(fmt.Sprintf("- `type %s interface`\n", iface.Name))
 			}
+			writeDoc(&b, iface.Doc, "  ")
 		}
 
 		for _, fn := range r.Functions {
@@ -100,7 +116,7 @@ func Markdown(sum *Summary) (string, error) {
 				sig = "func " + fn.Name + " " + sig
 			}
 			b.WriteString(fmt.Sprintf("- `%s`\n", sig))
-
+			writeDoc(&b, fn.Doc, "  ")
 			writeTypedCalls(&b, sum.CallGraph, r.Package+"."+fn.Name, "  ")
 		}
 

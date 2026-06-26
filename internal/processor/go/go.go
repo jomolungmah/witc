@@ -8,10 +8,19 @@ import (
 
 	"github.com/ai-suite/witc/internal/processor"
 	"go/ast"
+	"go/doc"
 	"go/parser"
 	"go/printer"
 	"go/token"
 )
+
+// docSynopsis returns the first sentence of a doc comment, or "" when absent.
+func docSynopsis(cg *ast.CommentGroup) string {
+	if cg == nil {
+		return ""
+	}
+	return doc.Synopsis(cg.Text())
+}
 
 // Processor implements processor.Processor for Go source files.
 type Processor struct {
@@ -39,6 +48,7 @@ func (p *Processor) Process(ctx context.Context, path string, src []byte) (*proc
 	result := &processor.Result{
 		Package:    f.Name.Name,
 		ImportPath: filepath.Dir(path),
+		Doc:        docSynopsis(f.Doc),
 		Structs:    nil,
 		Interfaces: nil,
 		Functions:  nil,
@@ -59,9 +69,15 @@ func (p *Processor) Process(ctx context.Context, path string, src []byte) (*proc
 				if !ok {
 					continue
 				}
+				// In a grouped "type ( ... )" block the doc is on the spec; for a
+				// single "type X ..." it is on the GenDecl.
+				typeDoc := ts.Doc
+				if typeDoc == nil {
+					typeDoc = x.Doc
+				}
 				switch t := ts.Type.(type) {
 				case *ast.StructType:
-					s := processor.Struct{Name: ts.Name.Name}
+					s := processor.Struct{Name: ts.Name.Name, Doc: docSynopsis(typeDoc)}
 					for _, field := range t.Fields.List {
 						for _, name := range field.Names {
 							s.Fields = append(s.Fields, processor.Field{
@@ -77,7 +93,7 @@ func (p *Processor) Process(ctx context.Context, path string, src []byte) (*proc
 					}
 					result.Structs = append(result.Structs, s)
 				case *ast.InterfaceType:
-					iface := processor.Interface{Name: ts.Name.Name}
+					iface := processor.Interface{Name: ts.Name.Name, Doc: docSynopsis(typeDoc)}
 					for _, m := range t.Methods.List {
 						if len(m.Names) > 0 {
 							sig := formatExpr(fset, m.Type)
@@ -103,9 +119,10 @@ func (p *Processor) Process(ctx context.Context, path string, src []byte) (*proc
 			}
 
 			sig := formatFuncType(fset, x.Type)
+			fnDoc := docSynopsis(x.Doc)
 			if x.Recv != nil {
 				recv := formatRecv(fset, x.Recv)
-				m := processor.Method{Receiver: recv, Name: x.Name.Name, Signature: sig}
+				m := processor.Method{Receiver: recv, Name: x.Name.Name, Doc: fnDoc, Signature: sig}
 				// Attach to struct if found
 				for i := range result.Structs {
 					if result.Structs[i].Name == baseType(recv) {
@@ -120,6 +137,7 @@ func (p *Processor) Process(ctx context.Context, path string, src []byte) (*proc
 			} else {
 				result.Functions = append(result.Functions, processor.Function{
 					Name:      x.Name.Name,
+					Doc:       fnDoc,
 					Signature: sig,
 				})
 			}

@@ -138,11 +138,18 @@ func runSummarize(cmd *cobra.Command, args []string) error {
 }
 
 func mergeResults(dst, src *processor.Result) {
+	// Preserve the package doc from whichever file carries it.
+	if dst.Doc == "" {
+		dst.Doc = src.Doc
+	}
 	// Merge structs by name (methods may be in different files)
 	for _, s := range src.Structs {
 		found := false
 		for i := range dst.Structs {
 			if dst.Structs[i].Name == s.Name {
+				if dst.Structs[i].Doc == "" {
+					dst.Structs[i].Doc = s.Doc
+				}
 				dst.Structs[i].Fields = append(dst.Structs[i].Fields, s.Fields...)
 				dst.Structs[i].Methods = append(dst.Structs[i].Methods, s.Methods...)
 				found = true
@@ -158,6 +165,9 @@ func mergeResults(dst, src *processor.Result) {
 		found := false
 		for i := range dst.Interfaces {
 			if dst.Interfaces[i].Name == iface.Name {
+				if dst.Interfaces[i].Doc == "" {
+					dst.Interfaces[i].Doc = iface.Doc
+				}
 				dst.Interfaces[i].Methods = append(dst.Interfaces[i].Methods, iface.Methods...)
 				found = true
 				break
