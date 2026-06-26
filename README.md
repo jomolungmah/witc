@@ -8,6 +8,22 @@ fits a context window.
 
 Go only, for now.
 
+## Installation
+
+Install a binary via
+
+```
+go install github.com/jomolungmah/witc/main/cmd@latest
+```
+
+Then copy a skill file to agent folder of your choosing, here's an example for OpenCode:
+
+```
+mkdir -p ~/.config/opencode/skills/witc \                                                                                                │
+curl -sSL https://raw.githubusercontent.com/jomolungmah/witc/refs/heads/main/.opencode/skill/witc/SKILL.md -o ~/.config/opencode/skills/w
+itc/SKILL.md
+```
+
 ## Usage
 
 ```bash
