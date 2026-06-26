@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"time"
 
 	"golang.org/x/tools/go/packages"
 )
@@ -16,6 +17,27 @@ import (
 // syntax trees plus full type information for the loaded packages and their deps.
 const loadMode = packages.NeedName | packages.NeedFiles | packages.NeedSyntax |
 	packages.NeedTypes | packages.NeedTypesInfo | packages.NeedImports | packages.NeedDeps
+
+// BuildOptions controls diagnostic instrumentation for the typed call-graph
+// build. The zero value is silent and behaves exactly like the original build.
+type BuildOptions struct {
+	// Logf, when non-nil, receives phase-level progress and timing messages
+	// (package load time, package counts, per-package walk timing, final tallies)
+	// — useful for understanding why the build is slow on a large repo.
+	Logf func(format string, args ...any)
+	// PerPackage, when true, logs per-package walk timing and counts via Logf.
+	PerPackage bool
+	// TracePackages, when true, routes go/packages driver logging through Logf.
+	// This surfaces every underlying `go list` invocation and its timing, which
+	// is the most granular view of where the type-checking phase spends time.
+	TracePackages bool
+}
+
+func (o BuildOptions) logf(format string, args ...any) {
+	if o.Logf != nil {
+		o.Logf(format, args...)
+	}
+}
 
 // BuildTypedCallGraph loads the Go module rooted at dir and constructs a call
 // graph using full type information. Unlike the AST-only path, callees are
@@ -26,7 +48,22 @@ const loadMode = packages.NeedName | packages.NeedFiles | packages.NeedSyntax |
 // It returns an error (so callers can fall back to the AST graph) when the
 // module cannot be loaded or type-checked.
 func BuildTypedCallGraph(dir string) (*CallGraph, error) {
+	return BuildTypedCallGraphWithOptions(dir, BuildOptions{})
+}
+
+// BuildTypedCallGraphWithOptions is BuildTypedCallGraph with diagnostic
+// instrumentation controlled by opts.
+func BuildTypedCallGraphWithOptions(dir string, opts BuildOptions) (*CallGraph, error) {
 	cfg := &packages.Config{Mode: loadMode, Dir: dir}
+	if opts.TracePackages && opts.Logf != nil {
+		// go/packages logs driver (go list) invocations and their timing here.
+		cfg.Logf = func(format string, args ...any) {
+			opts.Logf("packages: "+format, args...)
+		}
+	}
+
+	opts.logf("loading packages from %s ...", dir)
+	loadStart := time.Now()
 	pkgs, err := packages.Load(cfg, "./...")
 	if err != nil {
 		return nil, fmt.Errorf("load packages: %w", err)
@@ -34,6 +71,15 @@ func BuildTypedCallGraph(dir string) (*CallGraph, error) {
 	if len(pkgs) == 0 {
 		return nil, fmt.Errorf("no Go packages found in %s", dir)
 	}
+
+	// Count every package reachable through imports — that's the full set the
+	// type-checker had to process, and it usually explains a slow load far better
+	// than the count of the module's own packages.
+	typeChecked := 0
+	packages.Visit(pkgs, func(*packages.Package) bool { typeChecked++; return true }, nil)
+	opts.logf("loaded %d module package(s), %d total incl. dependencies, in %s",
+		len(pkgs), typeChecked, time.Since(loadStart).Round(time.Millisecond))
+
 	if n := packages.PrintErrors(pkgs); n > 0 {
 		return nil, fmt.Errorf("%d package load/type error(s)", n)
 	}
@@ -52,12 +98,26 @@ func BuildTypedCallGraph(dir string) (*CallGraph, error) {
 		extDeps:  map[string]map[string]bool{},
 	}
 
+	walkStart := time.Now()
+	// Sort packages so per-package logging is deterministic and easy to scan.
+	sort.Slice(pkgs, func(i, j int) bool { return pkgs[i].PkgPath < pkgs[j].PkgPath })
 	for _, p := range pkgs {
+		pkgStart := time.Now()
+		edgesBefore, funcsBefore := len(b.cg.Edges), len(b.cg.Functions)
 		for _, file := range p.Syntax {
 			b.walkFile(p, file)
 		}
+		if opts.PerPackage {
+			opts.logf("  walked %s: %d file(s), +%d edge(s), +%d func node(s) in %s",
+				p.PkgPath, len(p.Syntax),
+				len(b.cg.Edges)-edgesBefore, len(b.cg.Functions)-funcsBefore,
+				time.Since(pkgStart).Round(time.Millisecond))
+		}
 	}
 	b.finalizeExternalDeps()
+	opts.logf("built call graph: %d func node(s), %d edge(s), %d external call(s) in %s",
+		len(b.cg.Functions), len(b.cg.Edges), b.cg.ExternalCalls,
+		time.Since(walkStart).Round(time.Millisecond))
 	return b.cg, nil
 }
 

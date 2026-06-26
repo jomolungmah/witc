@@ -23,6 +23,8 @@ var (
 	detail       string
 	maxTokens    int
 	noProgress   bool
+	verbose      bool
+	veryVerbose  bool
 )
 
 func main() {
@@ -46,6 +48,8 @@ func main() {
 	summarizeCmd.Flags().StringVar(&detail, "detail", "high", "Output detail: low (API only), medium (+call graph, metrics), high (everything)")
 	summarizeCmd.Flags().IntVar(&maxTokens, "max-tokens", 0, "Cap estimated output size in tokens (0 = unlimited)")
 	summarizeCmd.Flags().BoolVar(&noProgress, "no-progress", false, "Disable progress output on stderr")
+	summarizeCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Log call-graph build phase timings and per-package counts to stderr")
+	summarizeCmd.Flags().BoolVar(&veryVerbose, "vv", false, "Very verbose: also trace go/packages driver (go list) invocations and timing")
 
 	rootCmd.AddCommand(summarizeCmd)
 
@@ -90,7 +94,10 @@ func runSummarize(cmd *cobra.Command, args []string) error {
 
 	// Progress goes to stderr so it never corrupts the summary on stdout or in
 	// the output file; it auto-disables when stderr isn't an interactive terminal.
-	rep := progress.New(os.Stderr, !noProgress && progress.IsTerminal(os.Stderr))
+	// Verbose modes print line-by-line diagnostics instead, so the animated
+	// spinner is suppressed to avoid the two clobbering each other.
+	verbose = verbose || veryVerbose
+	rep := progress.New(os.Stderr, !noProgress && !verbose && progress.IsTerminal(os.Stderr))
 
 	ctx := context.Background()
 	for i, f := range files {
@@ -126,7 +133,13 @@ func runSummarize(cmd *cobra.Command, args []string) error {
 	// be loaded or type-checked. This phase type-checks the dependency tree and
 	// is usually the slowest, so show an indeterminate spinner while it runs.
 	stop := rep.Spin("Building call graph (type-checking)")
-	typed, typedErr := goparser.BuildTypedCallGraph(root)
+	buildOpts := goparser.BuildOptions{PerPackage: verbose, TracePackages: veryVerbose}
+	if verbose {
+		buildOpts.Logf = func(format string, args ...any) {
+			fmt.Fprintf(os.Stderr, "witc: "+format+"\n", args...)
+		}
+	}
+	typed, typedErr := goparser.BuildTypedCallGraphWithOptions(root, buildOpts)
 	stop()
 	if typedErr == nil {
 		sum.CallGraph = typed
