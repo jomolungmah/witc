@@ -14,6 +14,9 @@ type CallGraph struct {
 	// module (standard library and third-party). Only the type-checked builder
 	// populates this; the AST aggregate leaves it zero.
 	ExternalCalls int `json:"externalCalls,omitempty"`
+	// ExternalDeps maps each analyzed package's import path to the sorted set
+	// of external packages it calls into. Populated by the typed builder only.
+	ExternalDeps map[string][]string `json:"externalDeps,omitempty"`
 }
 
 // FuncInfo contains information about a function in the call graph.

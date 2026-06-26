@@ -6,6 +6,7 @@ import (
 	"go/token"
 	"go/types"
 	"path/filepath"
+	"sort"
 	"strconv"
 
 	"golang.org/x/tools/go/packages"
@@ -48,6 +49,7 @@ func BuildTypedCallGraph(dir string) (*CallGraph, error) {
 		cg:       &CallGraph{Functions: map[string]*FuncInfo{}, Edges: []Edge{}},
 		inModule: inModule,
 		edges:    map[string]struct{}{},
+		extDeps:  map[string]map[string]bool{},
 	}
 
 	for _, p := range pkgs {
@@ -55,6 +57,7 @@ func BuildTypedCallGraph(dir string) (*CallGraph, error) {
 			b.walkFile(p, file)
 		}
 	}
+	b.finalizeExternalDeps()
 	return b.cg, nil
 }
 
@@ -62,6 +65,27 @@ type typedBuilder struct {
 	cg       *CallGraph
 	inModule map[string]bool
 	edges    map[string]struct{}
+	// extDeps records, per analyzed package path, the set of external package
+	// paths it calls into.
+	extDeps map[string]map[string]bool
+}
+
+// finalizeExternalDeps converts the accumulated dependency sets into the sorted
+// slices exposed on the call graph.
+func (b *typedBuilder) finalizeExternalDeps() {
+	if len(b.extDeps) == 0 {
+		return
+	}
+	deps := make(map[string][]string, len(b.extDeps))
+	for pkg, set := range b.extDeps {
+		paths := make([]string, 0, len(set))
+		for p := range set {
+			paths = append(paths, p)
+		}
+		sort.Strings(paths)
+		deps[pkg] = paths
+	}
+	b.cg.ExternalDeps = deps
 }
 
 func (b *typedBuilder) walkFile(p *packages.Package, file *ast.File) {
@@ -99,8 +123,15 @@ func (b *typedBuilder) walkFile(p *packages.Package, file *ast.File) {
 			}
 			if !b.inModule[calleePkg] {
 				// Standard library or third-party call: out of scope for the
-				// internal call graph, but counted for metrics.
+				// internal call graph, but counted and tracked for metrics and
+				// the dependency map.
 				b.cg.ExternalCalls++
+				if calleePkg != "" {
+					if b.extDeps[p.PkgPath] == nil {
+						b.extDeps[p.PkgPath] = map[string]bool{}
+					}
+					b.extDeps[p.PkgPath][calleePkg] = true
+				}
 				return true
 			}
 			b.addEdge(callerName, p.PkgPath, callee, p.Fset.Position(call.Pos()))

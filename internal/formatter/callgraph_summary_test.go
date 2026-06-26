@@ -92,11 +92,22 @@ func TestGenerateCallFlow_CycleDetection(t *testing.T) {
 
 func TestGenerateDependencyMap(t *testing.T) {
 	cg := makeGraph(map[string][]string{"Process": {"helper"}})
-	cg.ExternalCalls = 7
+	cg.ExternalDeps = map[string][]string{
+		"example.com/app/svc": {"fmt", "github.com/spf13/cobra"},
+	}
 
 	summary := GenerateDependencyMap(cg)
-	if !strings.Contains(summary, "7") {
-		t.Errorf("expected external call count in dependency map, got: %q", summary)
+	for _, want := range []string{"example.com/app/svc", "fmt", "github.com/spf13/cobra"} {
+		if !strings.Contains(summary, want) {
+			t.Errorf("dependency map missing %q, got:\n%s", want, summary)
+		}
+	}
+}
+
+func TestGenerateDependencyMap_None(t *testing.T) {
+	summary := GenerateDependencyMap(makeGraph(map[string][]string{"a": {"b"}}))
+	if !strings.Contains(summary, "No external package calls") {
+		t.Errorf("expected no-deps message, got: %q", summary)
 	}
 }
 

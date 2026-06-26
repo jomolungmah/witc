@@ -128,21 +128,32 @@ func traverseCallFlow(name string, cg *goparser.CallGraph, b *strings.Builder, v
 	}
 }
 
-// GenerateDependencyMap lists the external packages each module package calls
+// GenerateDependencyMap lists the external packages each analyzed package calls
 // into, derived from the type-checked external-call edges.
 func GenerateDependencyMap(cg *goparser.CallGraph) string {
 	var b strings.Builder
 	b.WriteString("### Package Dependencies\n\n")
-	if cg == nil {
+	if cg == nil || len(cg.ExternalDeps) == 0 {
+		b.WriteString("No external package calls detected.\n\n")
 		return b.String()
 	}
-	// The typed graph records external-call counts but not their packages, so
-	// this section intentionally stays high-level for now.
-	if cg.ExternalCalls > 0 {
-		b.WriteString("The module makes " + strconv.Itoa(cg.ExternalCalls) +
-			" calls into the standard library and third-party packages.\n\n")
-	} else {
-		b.WriteString("No external package calls detected.\n\n")
+
+	pkgs := make([]string, 0, len(cg.ExternalDeps))
+	for p := range cg.ExternalDeps {
+		pkgs = append(pkgs, p)
+	}
+	sort.Strings(pkgs)
+
+	for _, p := range pkgs {
+		deps := cg.ExternalDeps[p]
+		if len(deps) == 0 {
+			continue
+		}
+		b.WriteString("**`" + p + "`** uses:\n\n")
+		for _, dep := range deps {
+			b.WriteString("- `" + dep + "`\n")
+		}
+		b.WriteString("\n")
 	}
 	return b.String()
 }
