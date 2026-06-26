@@ -3,6 +3,7 @@ package scanner
 import (
 	"io/fs"
 	"path/filepath"
+	"strings"
 
 	gitignore "github.com/sabhiram/go-gitignore"
 )
@@ -22,9 +23,9 @@ var skipDirs = map[string]bool{
 }
 
 // Scan walks the directory tree and returns discovered source files.
-// Paths are relative to root. Skips vendor, node_modules, .git, testdata.
-// Respects .gitignore if present at root.
-func Scan(root string) ([]File, error) {
+// Paths are relative to root. Skips vendor, node_modules, .git, testdata, and
+// (unless includeTests is true) _test.go files. Respects .gitignore if present.
+func Scan(root string, includeTests bool) ([]File, error) {
 	ignorer, _ := gitignore.CompileIgnoreFile(filepath.Join(root, ".gitignore"))
 
 	var files []File
@@ -54,6 +55,9 @@ func Scan(root string) ([]File, error) {
 		}
 		ext := filepath.Ext(path)
 		if ext != ".go" {
+			return nil
+		}
+		if !includeTests && strings.HasSuffix(d.Name(), "_test.go") {
 			return nil
 		}
 		files = append(files, File{Path: rel, Ext: ext})

@@ -18,7 +18,7 @@ var (
 	format       string
 	noStructure  bool
 	excludeGen   bool
-	excludeTests bool
+	includeTests bool
 	detail       string
 	maxTokens    int
 )
@@ -40,7 +40,7 @@ func main() {
 	summarizeCmd.Flags().StringVar(&format, "format", "markdown", "Output format: markdown, json")
 	summarizeCmd.Flags().BoolVar(&noStructure, "no-structure", false, "Omit file structure, output API surface only")
 	summarizeCmd.Flags().BoolVar(&excludeGen, "exclude-generated", false, "Skip generated Go files")
-	summarizeCmd.Flags().BoolVar(&excludeTests, "exclude-tests", false, "Exclude test functions from output")
+	summarizeCmd.Flags().BoolVar(&includeTests, "include-tests", false, "Include _test.go files in the summary")
 	summarizeCmd.Flags().StringVar(&detail, "detail", "high", "Output detail: low (API only), medium (+call graph, metrics), high (everything)")
 	summarizeCmd.Flags().IntVar(&maxTokens, "max-tokens", 0, "Cap estimated output size in tokens (0 = unlimited)")
 
@@ -70,12 +70,12 @@ func runSummarize(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("%s is not a directory", root)
 	}
 
-	files, err := scanner.Scan(root)
+	files, err := scanner.Scan(root, includeTests)
 	if err != nil {
 		return fmt.Errorf("scan: %w", err)
 	}
 
-	proc := goparser.Processor{ExcludeGenerated: excludeGen, ExcludeTests: excludeTests}
+	proc := goparser.Processor{ExcludeGenerated: excludeGen}
 	sum := &formatter.Summary{
 		Root:        root,
 		Paths:       make([]string, 0, len(files)),

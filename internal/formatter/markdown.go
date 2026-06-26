@@ -95,7 +95,7 @@ func Markdown(sum *Summary) (string, error) {
 	candidates := []section{
 		{0, header},
 		{2, structureSection(sum)},
-		{1, apiSection(sum, includeInlineCalls, apiBudget)},
+		{1, apiSection(sum, includeInlineCalls, detail != detailHigh, apiBudget)},
 		{3, callGraphSection(sum.CallGraph)},
 		{4, metricsSection(sum.CallGraph)},
 		{5, GenerateCallSummary(sum.CallGraph)},
@@ -182,7 +182,7 @@ func structureSection(sum *Summary) string {
 // are emitted in importance order (types, then exported and unexported
 // functions by call-graph centrality) and truncated once the budget is hit,
 // with a per-package note of how many were omitted.
-func apiSection(sum *Summary, includeInlineCalls bool, budget int) string {
+func apiSection(sum *Summary, includeInlineCalls, collapseUnexported bool, budget int) string {
 	pkgNames := make([]string, 0, len(sum.Packages))
 	for k := range sum.Packages {
 		pkgNames = append(pkgNames, k)
@@ -206,7 +206,7 @@ func apiSection(sum *Summary, includeInlineCalls bool, budget int) string {
 		tokens += estimateTokens(head)
 
 		omitted := 0
-		for _, entry := range symbolEntries(r, sum.CallGraph, includeInlineCalls) {
+		for _, entry := range symbolEntries(r, sum.CallGraph, includeInlineCalls, collapseUnexported) {
 			et := estimateTokens(entry)
 			if budget > 0 && tokens+et > budget {
 				omitted++
@@ -228,7 +228,7 @@ func apiSection(sum *Summary, includeInlineCalls bool, budget int) string {
 // symbolEntries renders each symbol in a package as a standalone block, ordered
 // by importance so the least useful are the first to be truncated: types, then
 // exported functions by centrality, then unexported functions by centrality.
-func symbolEntries(r *processor.Result, cg *goparser.CallGraph, includeInlineCalls bool) []string {
+func symbolEntries(r *processor.Result, cg *goparser.CallGraph, includeInlineCalls, collapseUnexported bool) []string {
 	var entries []string
 
 	for _, s := range r.Structs {
@@ -256,10 +256,23 @@ func symbolEntries(r *processor.Result, cg *goparser.CallGraph, includeInlineCal
 			return fns[i].Name < fns[j].Name
 		})
 	}
+
+	// Exported API leads; unexported helpers follow (or collapse to a count at
+	// lower detail levels).
 	byCentrality(exported)
-	byCentrality(unexported)
-	for _, fn := range append(exported, unexported...) {
+	for _, fn := range exported {
 		entries = append(entries, renderFunc(r, fn, cg, includeInlineCalls))
+	}
+
+	if collapseUnexported {
+		if len(unexported) > 0 {
+			entries = append(entries, fmt.Sprintf("- _%d unexported helper(s) (use --detail high to expand)_\n", len(unexported)))
+		}
+	} else {
+		byCentrality(unexported)
+		for _, fn := range unexported {
+			entries = append(entries, renderFunc(r, fn, cg, includeInlineCalls))
+		}
 	}
 	return entries
 }

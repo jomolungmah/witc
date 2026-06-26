@@ -25,7 +25,6 @@ func docSynopsis(cg *ast.CommentGroup) string {
 // Processor implements processor.Processor for Go source files.
 type Processor struct {
 	ExcludeGenerated bool
-	ExcludeTests     bool
 }
 
 // Supports returns true for .go extension.
@@ -114,10 +113,6 @@ func (p *Processor) Process(ctx context.Context, path string, src []byte) (*proc
 			}
 			return false
 		case *ast.FuncDecl:
-			if p.ExcludeTests && isTestFunction(x) {
-				return true
-			}
-
 			sig := formatFuncType(fset, x.Type)
 			fnDoc := docSynopsis(x.Doc)
 			if x.Recv != nil {
@@ -275,30 +270,4 @@ func baseType(recv string) string {
 		return recv[1:]
 	}
 	return recv
-}
-
-// isTestFunction checks if a function declaration is a test function.
-// Test functions start with "Test" and have at least one parameter of type "*testing.T".
-func isTestFunction(fn *ast.FuncDecl) bool {
-	if len(fn.Name.Name) < 4 || fn.Name.Name[:4] != "Test" {
-		return false
-	}
-
-	if fn.Type.Params == nil || len(fn.Type.Params.List) == 0 {
-		return false
-	}
-
-	for _, param := range fn.Type.Params.List {
-		if starExpr, ok := param.Type.(*ast.StarExpr); ok {
-			if selExpr, ok := starExpr.X.(*ast.SelectorExpr); ok {
-				if ident, ok := selExpr.X.(*ast.Ident); ok {
-					if ident.Name == "testing" && selExpr.Sel.Name == "T" {
-						return true
-					}
-				}
-			}
-		}
-	}
-
-	return false
 }

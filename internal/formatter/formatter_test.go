@@ -196,6 +196,39 @@ func TestMarkdown_UnlimitedIncludesAll(t *testing.T) {
 	}
 }
 
+func TestMarkdown_SelectivityAndCollapse(t *testing.T) {
+	sum := &Summary{
+		Root: "/x",
+		Packages: map[string]*processor.Result{
+			"pkg": {Package: "pkg", Functions: []processor.Function{
+				{Name: "helperOne", Signature: "func()"},
+				{Name: "Exported", Signature: "func()"},
+				{Name: "helperTwo", Signature: "func()"},
+			}},
+		},
+	}
+
+	sum.Detail = detailHigh
+	high, _ := Markdown(sum)
+	expIdx := strings.Index(high, "func Exported")
+	helpIdx := strings.Index(high, "func helperOne")
+	if expIdx < 0 || helpIdx < 0 {
+		t.Fatalf("expected both exported and unexported funcs at high detail:\n%s", high)
+	}
+	if expIdx > helpIdx {
+		t.Error("exported functions should be listed before unexported ones")
+	}
+
+	sum.Detail = detailMedium
+	med, _ := Markdown(sum)
+	if strings.Contains(med, "func helperOne") {
+		t.Error("unexported helpers should be collapsed at medium detail")
+	}
+	if !strings.Contains(med, "2 unexported helper") {
+		t.Errorf("expected collapse summary line, got:\n%s", med)
+	}
+}
+
 func TestJSON(t *testing.T) {
 	sum := &Summary{
 		Root:  "/tmp/example",
