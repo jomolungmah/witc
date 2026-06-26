@@ -1,6 +1,8 @@
 package goparser
 
 import (
+	"sort"
+
 	"github.com/ai-suite/witc/internal/processor"
 )
 
@@ -15,100 +17,117 @@ type Metrics struct {
 
 	// Extremes (function names with highest values)
 	MaxFanIn          string   `json:"maxFanInFunction"`
+	MaxFanInCount     int      `json:"maxFanInCount"`
 	MaxFanOut         string   `json:"maxFanOutFunction"`
-	DeepestCallChain  string   `json:"deepestCallChainFunction"`
+	MaxFanOutCount    int      `json:"maxFanOutCount"`
 	ExternalCalls     int      `json:"externalCalls"`
 	InternalCalls     int      `json:"internalCalls"`
 	HighCouplingFuncs []string `json:"highCouplingFunctions"`
 }
 
-// CalculateMetrics computes various metrics from an aggregated call graph.
+// CalculateMetrics computes metrics directly from the call graph's structure.
+// Fan-in is a function's number of incoming edges (Callers) and fan-out its
+// outgoing edges (Callees); internal calls are edges within the analyzed
+// module, while external calls are recorded on the graph by the typed builder.
 func CalculateMetrics(cg *CallGraph) *Metrics {
-	m := &Metrics{
-		TotalFunctions:    0,
-		TotalCalls:        0,
-		MaxCallDepth:      0,
-		AvgCallersPerFunc: 0,
-		AvgCalleesPerFunc: 0,
-		ExternalCalls:     0,
-		InternalCalls:     0,
-	}
-
+	m := &Metrics{}
 	if cg == nil || cg.Functions == nil {
 		return m
 	}
 
 	m.TotalFunctions = len(cg.Functions)
+	m.ExternalCalls = cg.ExternalCalls
 
-	funcCallers := make(map[string]int) // function -> number of callers
-	funcCallees := make(map[string]int) // function -> number of unique callees
+	// Deterministic iteration so ties resolve to a stable function name.
+	names := make([]string, 0, len(cg.Functions))
+	for name := range cg.Functions {
+		names = append(names, name)
+	}
+	sort.Strings(names)
 
-	for funcName, info := range cg.Functions {
+	var totalFanIn, totalFanOut int
+	for _, name := range names {
+		info := cg.Functions[name]
 		if info == nil {
 			continue
 		}
+		fanIn := len(info.Callers)
+		fanOut := len(info.Callees)
+		totalFanIn += fanIn
+		totalFanOut += fanOut
 
-		funcCallees[funcName] = len(info.Callees)
-
-		for _, callee := range info.Callees {
-			funcCallers[callee.Name]++
-			m.TotalCalls++
-
-			if isExternalCall(callee.Name, info.Package) {
-				m.ExternalCalls++
-			} else {
-				m.InternalCalls++
-			}
+		if fanIn > m.MaxFanInCount {
+			m.MaxFanInCount = fanIn
+			m.MaxFanIn = name
 		}
-
-		for _, caller := range info.Callers {
-			funcCallers[caller.Name]++
+		if fanOut > m.MaxFanOutCount {
+			m.MaxFanOutCount = fanOut
+			m.MaxFanOut = name
 		}
 	}
 
-	totalFuncs := len(funcCallers) + len(funcCallees)
-	if totalFuncs > 0 {
-		var totalFanIn, totalFanOut int
-		for _, fans := range funcCallers {
-			totalFanIn += fans
-		}
-		for _, fans := range funcCallees {
-			totalFanOut += fans
-		}
+	// Each outgoing edge is one internal call.
+	m.InternalCalls = totalFanOut
+	m.TotalCalls = m.InternalCalls + m.ExternalCalls
 
-		m.AvgCallersPerFunc = float64(totalFanIn) / float64(totalFuncs)
-		m.AvgCalleesPerFunc = float64(totalFanOut) / float64(totalFuncs)
+	if m.TotalFunctions > 0 {
+		m.AvgCallersPerFunc = float64(totalFanIn) / float64(m.TotalFunctions)
+		m.AvgCalleesPerFunc = float64(totalFanOut) / float64(m.TotalFunctions)
 	}
 
-	maxFanInCount := 0
-	for funcName, count := range funcCallers {
-		if count > maxFanInCount {
-			maxFanInCount = count
-			m.MaxFanIn = funcName
-		}
-	}
-
-	maxFanOutCount := 0
-	for funcName, count := range funcCallees {
-		if count > maxFanOutCount {
-			maxFanOutCount = count
-			m.MaxFanOut = funcName
-		}
-	}
-
-	m.MaxCallDepth = estimateMaxCallDepth(funcCallees)
+	m.MaxCallDepth = maxCallDepth(cg)
 
 	threshold := int(m.AvgCalleesPerFunc * 2)
 	if threshold < 5 {
 		threshold = 5
 	}
-	for funcName, count := range funcCallees {
-		if count >= threshold {
-			m.HighCouplingFuncs = append(m.HighCouplingFuncs, funcName)
+	for _, name := range names {
+		if len(cg.Functions[name].Callees) >= threshold {
+			m.HighCouplingFuncs = append(m.HighCouplingFuncs, name)
 		}
 	}
 
 	return m
+}
+
+// maxCallDepth returns the length of the longest call chain in the graph,
+// guarding against cycles so recursive code doesn't loop forever.
+func maxCallDepth(cg *CallGraph) int {
+	memo := make(map[string]int)
+	onStack := make(map[string]bool)
+
+	var depth func(name string) int
+	depth = func(name string) int {
+		if d, ok := memo[name]; ok {
+			return d
+		}
+		if onStack[name] {
+			return 0 // cycle: stop counting along this path
+		}
+		info := cg.Functions[name]
+		if info == nil || len(info.Callees) == 0 {
+			memo[name] = 1
+			return 1
+		}
+		onStack[name] = true
+		best := 0
+		for _, callee := range info.Callees {
+			if d := depth(callee.Name); d > best {
+				best = d
+			}
+		}
+		onStack[name] = false
+		memo[name] = best + 1
+		return best + 1
+	}
+
+	max := 0
+	for name := range cg.Functions {
+		if d := depth(name); d > max {
+			max = d
+		}
+	}
+	return max
 }
 
 func isExternalCall(calleeName, currentPackage string) bool {

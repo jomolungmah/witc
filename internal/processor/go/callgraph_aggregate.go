@@ -10,6 +10,10 @@ import (
 type CallGraph struct {
 	Functions map[string]*FuncInfo `json:"functions"`
 	Edges     []Edge               `json:"edges"`
+	// ExternalCalls counts resolved calls to functions outside the analyzed
+	// module (standard library and third-party). Only the type-checked builder
+	// populates this; the AST aggregate leaves it zero.
+	ExternalCalls int `json:"externalCalls,omitempty"`
 }
 
 // FuncInfo contains information about a function in the call graph.

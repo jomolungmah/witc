@@ -106,7 +106,16 @@ func runSummarize(cmd *cobra.Command, args []string) error {
 	for _, r := range sum.Packages {
 		results = append(results, r)
 	}
-	sum.CallGraph = goparser.Aggregate(results)
+
+	// Prefer a type-checked call graph (resolves callees precisely and merges
+	// duplicate nodes); fall back to the AST-only aggregate if the module can't
+	// be loaded or type-checked.
+	if typed, err := goparser.BuildTypedCallGraph(root); err == nil {
+		sum.CallGraph = typed
+	} else {
+		fmt.Fprintf(os.Stderr, "witc: using AST call graph (%v)\n", err)
+		sum.CallGraph = goparser.Aggregate(results)
+	}
 
 	var out string
 	switch format {

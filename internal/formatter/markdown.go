@@ -191,15 +191,13 @@ func Markdown(sum *Summary) (string, error) {
 			}
 
 			if metrics.MaxFanIn != "" {
-				fanInCount := getFunctionCallerCount(sum.CallGraph, metrics.MaxFanIn)
 				b.WriteString(fmt.Sprintf("- **Most Called Function:** `%s` (called by %d functions)\n",
-					metrics.MaxFanIn, fanInCount))
+					metrics.MaxFanIn, metrics.MaxFanInCount))
 			}
 
 			if metrics.MaxFanOut != "" {
-				fanOutCount := len(sum.CallGraph.Functions[metrics.MaxFanOut].Callees)
 				b.WriteString(fmt.Sprintf("- **Highest Fan-out:** `%s` (calls %d other functions)\n",
-					metrics.MaxFanOut, fanOutCount))
+					metrics.MaxFanOut, metrics.MaxFanOutCount))
 			}
 
 			if len(metrics.HighCouplingFuncs) > 0 {
@@ -340,22 +338,3 @@ func deduplicateStrings(s []string) []string {
 	return result
 }
 
-func getFunctionCallerCount(cg *goparser.CallGraph, funcName string) int {
-	if cg == nil || cg.Functions == nil {
-		return 0
-	}
-
-	count := 0
-	for _, info := range cg.Functions {
-		if info == nil {
-			continue
-		}
-		for _, caller := range info.Callers {
-			if caller.Name == funcName {
-				count++
-			}
-		}
-	}
-
-	return count
-}
