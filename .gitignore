@@ -1,2 +1,3 @@
 /witc
 *.exe
+.witc/

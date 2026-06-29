@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/jomolungmah/witc/internal/formatter"
+	"github.com/jomolungmah/witc/internal/index"
 	"github.com/jomolungmah/witc/internal/processor"
 	goparser "github.com/jomolungmah/witc/internal/processor/go"
 	"github.com/jomolungmah/witc/internal/progress"
@@ -24,6 +25,7 @@ var (
 	maxTokens    int
 	noProgress   bool
 	verbosity    int
+	indexForce   bool
 )
 
 func main() {
@@ -51,52 +53,79 @@ func main() {
 
 	rootCmd.AddCommand(summarizeCmd)
 
+	indexCmd := &cobra.Command{
+		Use:   "index [path]",
+		Short: "Build and cache a JSON index for fast, low-token queries",
+		Long: "Build the summary once and cache it to .witc/index.json so query\n" +
+			"commands can answer targeted lookups without recomputing the call graph.\n" +
+			"Re-running on unchanged source is a no-op unless --force is given.",
+		Args: cobra.MaximumNArgs(1),
+		RunE: runIndex,
+	}
+	indexCmd.Flags().BoolVar(&excludeGen, "exclude-generated", false, "Skip generated Go files")
+	indexCmd.Flags().BoolVar(&includeTests, "include-tests", false, "Include _test.go files in the index")
+	indexCmd.Flags().BoolVar(&noProgress, "no-progress", false, "Disable progress output on stderr")
+	indexCmd.Flags().CountVarP(&verbosity, "verbose", "v", "Increase verbosity (repeatable); see 'summarize --help'")
+	indexCmd.Flags().BoolVar(&indexForce, "force", false, "Rebuild even when the cached index is up to date")
+	rootCmd.AddCommand(indexCmd)
+
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
 }
 
-func runSummarize(cmd *cobra.Command, args []string) error {
+// resolveRoot turns an optional path argument into a validated absolute
+// directory, defaulting to the current directory.
+func resolveRoot(args []string) (string, error) {
 	root := "."
 	if len(args) > 0 {
 		root = args[0]
 	}
-
 	root, err := filepath.Abs(root)
 	if err != nil {
-		return fmt.Errorf("resolve path: %w", err)
+		return "", fmt.Errorf("resolve path: %w", err)
 	}
-
 	info, err := os.Stat(root)
 	if err != nil {
-		return fmt.Errorf("stat %s: %w", root, err)
+		return "", fmt.Errorf("stat %s: %w", root, err)
 	}
 	if !info.IsDir() {
-		return fmt.Errorf("%s is not a directory", root)
+		return "", fmt.Errorf("%s is not a directory", root)
 	}
+	return root, nil
+}
 
-	files, err := scanner.Scan(root, includeTests)
-	if err != nil {
-		return fmt.Errorf("scan: %w", err)
-	}
+// buildOptions carries the inputs the scan/parse/call-graph pipeline needs,
+// decoupled from the command-specific flags so summarize and index can share it.
+type buildOptions struct {
+	excludeGenerated bool
+	includeTests     bool
+	noStructure      bool
+	detail           string
+	maxTokens        int
+	progress         bool
+	verbose          bool
+	veryVerbose      bool
+}
 
-	proc := goparser.Processor{ExcludeGenerated: excludeGen}
+// buildSummary runs the full pipeline (parse API surface, then build the
+// call graph) over the pre-scanned files and returns the aggregated summary.
+func buildSummary(root string, files []scanner.File, o buildOptions) (*formatter.Summary, error) {
+	proc := goparser.Processor{ExcludeGenerated: o.excludeGenerated}
 	sum := &formatter.Summary{
 		Root:        root,
 		Paths:       make([]string, 0, len(files)),
 		Packages:    make(map[string]*processor.Result),
-		NoStructure: noStructure,
-		Detail:      detail,
-		MaxTokens:   maxTokens,
+		NoStructure: o.noStructure,
+		Detail:      o.detail,
+		MaxTokens:   o.maxTokens,
 	}
 
 	// Progress goes to stderr so it never corrupts the summary on stdout or in
 	// the output file; it auto-disables when stderr isn't an interactive terminal.
 	// Verbose modes print line-by-line diagnostics instead, so the animated
 	// spinner is suppressed to avoid the two clobbering each other.
-	verbose := verbosity >= 1
-	veryVerbose := verbosity >= 2
-	rep := progress.New(os.Stderr, !noProgress && !verbose && progress.IsTerminal(os.Stderr))
+	rep := progress.New(os.Stderr, o.progress && !o.verbose && progress.IsTerminal(os.Stderr))
 
 	ctx := context.Background()
 	for i, f := range files {
@@ -107,11 +136,11 @@ func runSummarize(cmd *cobra.Command, args []string) error {
 		sum.Paths = append(sum.Paths, f.Path)
 		src, err := os.ReadFile(filepath.Join(root, f.Path))
 		if err != nil {
-			return fmt.Errorf("read %s: %w", f.Path, err)
+			return nil, fmt.Errorf("read %s: %w", f.Path, err)
 		}
 		result, err := proc.Process(ctx, f.Path, src)
 		if err != nil {
-			return fmt.Errorf("process %s: %w", f.Path, err)
+			return nil, fmt.Errorf("process %s: %w", f.Path, err)
 		}
 		pkgPath := filepath.Dir(f.Path)
 		result.ImportPath = pkgPath
@@ -132,8 +161,8 @@ func runSummarize(cmd *cobra.Command, args []string) error {
 	// be loaded or type-checked. This phase type-checks the dependency tree and
 	// is usually the slowest, so show an indeterminate spinner while it runs.
 	stop := rep.Spin("Building call graph (type-checking)")
-	buildOpts := goparser.BuildOptions{PerPackage: verbose, TracePackages: veryVerbose}
-	if verbose {
+	buildOpts := goparser.BuildOptions{PerPackage: o.verbose, TracePackages: o.veryVerbose}
+	if o.verbose {
 		buildOpts.Logf = func(format string, args ...any) {
 			fmt.Fprintf(os.Stderr, "witc: "+format+"\n", args...)
 		}
@@ -147,6 +176,79 @@ func runSummarize(cmd *cobra.Command, args []string) error {
 		sum.CallGraph = goparser.Aggregate(results)
 	}
 	rep.Done(fmt.Sprintf("Analyzed %d files in %d packages", len(sum.Paths), len(sum.Packages)))
+	return sum, nil
+}
+
+func runIndex(cmd *cobra.Command, args []string) error {
+	root, err := resolveRoot(args)
+	if err != nil {
+		return err
+	}
+
+	// The cache key is cheap to compute (just stats the scanned files), so check
+	// freshness before the expensive type-checked build.
+	files, err := scanner.Scan(root, includeTests)
+	if err != nil {
+		return fmt.Errorf("scan: %w", err)
+	}
+	key, err := index.ComputeKey(root, files)
+	if err != nil {
+		return fmt.Errorf("compute cache key: %w", err)
+	}
+	if !indexForce && index.Fresh(root, key) {
+		fmt.Fprintf(os.Stderr, "witc: index is up to date (%s)\n", index.Path(root))
+		return nil
+	}
+
+	// The index always stores the full surface at JSON's schema; detail and token
+	// budgeting are presentation concerns applied later by query/summarize.
+	sum, err := buildSummary(root, files, buildOptions{
+		excludeGenerated: excludeGen,
+		includeTests:     includeTests,
+		detail:           "high",
+		progress:         !noProgress,
+		verbose:          verbosity >= 1,
+		veryVerbose:      verbosity >= 2,
+	})
+	if err != nil {
+		return err
+	}
+
+	data, err := formatter.JSON(sum)
+	if err != nil {
+		return err
+	}
+	if err := index.Write(root, data, key); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "witc: wrote %s (%d packages)\n", index.Path(root), len(sum.Packages))
+	return nil
+}
+
+func runSummarize(cmd *cobra.Command, args []string) error {
+	root, err := resolveRoot(args)
+	if err != nil {
+		return err
+	}
+
+	files, err := scanner.Scan(root, includeTests)
+	if err != nil {
+		return fmt.Errorf("scan: %w", err)
+	}
+
+	sum, err := buildSummary(root, files, buildOptions{
+		excludeGenerated: excludeGen,
+		includeTests:     includeTests,
+		noStructure:      noStructure,
+		detail:           detail,
+		maxTokens:        maxTokens,
+		progress:         !noProgress,
+		verbose:          verbosity >= 1,
+		veryVerbose:      verbosity >= 2,
+	})
+	if err != nil {
+		return err
+	}
 
 	var out string
 	switch format {
