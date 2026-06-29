@@ -58,6 +58,59 @@ func NewFoo() *Foo { return nil }
 	}
 }
 
+func TestProcess_TracksSymbolLocations(t *testing.T) {
+	src := `package pkg
+
+type Foo struct {
+	Name string
+}
+
+func (f *Foo) Bar() int { return 0 }
+
+type Reader interface {
+	Read(p []byte) (n int, err error)
+}
+
+func NewFoo() *Foo { return nil }
+`
+	proc := Processor{}
+	result, err := proc.Process(context.Background(), "pkg/foo.go", []byte(src))
+	if err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+
+	// The location's File is the path passed to Process, slash-normalized.
+	const wantFile = "pkg/foo.go"
+
+	if len(result.Structs) != 1 {
+		t.Fatalf("len(Structs) = %d, want 1", len(result.Structs))
+	}
+	s := result.Structs[0]
+	if s.Loc.File != wantFile || s.Loc.Line != 3 {
+		t.Errorf("struct Loc = %s:%d, want %s:3", s.Loc.File, s.Loc.Line, wantFile)
+	}
+	if len(s.Methods) != 1 {
+		t.Fatalf("len(Methods) = %d, want 1", len(s.Methods))
+	}
+	if m := s.Methods[0]; m.Loc.File != wantFile || m.Loc.Line != 7 {
+		t.Errorf("method Loc = %s:%d, want %s:7", m.Loc.File, m.Loc.Line, wantFile)
+	}
+
+	if len(result.Interfaces) != 1 {
+		t.Fatalf("len(Interfaces) = %d, want 1", len(result.Interfaces))
+	}
+	if iface := result.Interfaces[0]; iface.Loc.File != wantFile || iface.Loc.Line != 9 {
+		t.Errorf("interface Loc = %s:%d, want %s:9", iface.Loc.File, iface.Loc.Line, wantFile)
+	}
+
+	if len(result.Functions) != 1 {
+		t.Fatalf("len(Functions) = %d, want 1", len(result.Functions))
+	}
+	if fn := result.Functions[0]; fn.Loc.File != wantFile || fn.Loc.Line != 13 {
+		t.Errorf("function Loc = %s:%d, want %s:13", fn.Loc.File, fn.Loc.Line, wantFile)
+	}
+}
+
 func TestFormatFuncType_GroupedParamsAndNamedResults(t *testing.T) {
 	src := `
 package pkg

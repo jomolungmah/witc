@@ -22,6 +22,18 @@ func docSynopsis(cg *ast.CommentGroup) string {
 	return doc.Synopsis(cg.Text())
 }
 
+// locOf resolves an AST position to a processor.Location. The filename comes
+// from the path passed to Process, which is already relative to the scan root;
+// it is slash-normalized so output is stable across platforms.
+func locOf(fset *token.FileSet, pos token.Pos) processor.Location {
+	p := fset.Position(pos)
+	return processor.Location{
+		File:   filepath.ToSlash(p.Filename),
+		Line:   p.Line,
+		Column: p.Column,
+	}
+}
+
 // Processor implements processor.Processor for Go source files.
 type Processor struct {
 	ExcludeGenerated bool
@@ -76,7 +88,7 @@ func (p *Processor) Process(ctx context.Context, path string, src []byte) (*proc
 				}
 				switch t := ts.Type.(type) {
 				case *ast.StructType:
-					s := processor.Struct{Name: ts.Name.Name, Doc: docSynopsis(typeDoc)}
+					s := processor.Struct{Name: ts.Name.Name, Doc: docSynopsis(typeDoc), Loc: locOf(fset, ts.Name.Pos())}
 					for _, field := range t.Fields.List {
 						for _, name := range field.Names {
 							s.Fields = append(s.Fields, processor.Field{
@@ -92,18 +104,20 @@ func (p *Processor) Process(ctx context.Context, path string, src []byte) (*proc
 					}
 					result.Structs = append(result.Structs, s)
 				case *ast.InterfaceType:
-					iface := processor.Interface{Name: ts.Name.Name, Doc: docSynopsis(typeDoc)}
+					iface := processor.Interface{Name: ts.Name.Name, Doc: docSynopsis(typeDoc), Loc: locOf(fset, ts.Name.Pos())}
 					for _, m := range t.Methods.List {
 						if len(m.Names) > 0 {
 							sig := formatExpr(fset, m.Type)
 							for _, name := range m.Names {
 								iface.Methods = append(iface.Methods, processor.Method{
 									Name:      name.Name,
+									Loc:       locOf(fset, name.Pos()),
 									Signature: sig,
 								})
 							}
 						} else {
 							iface.Methods = append(iface.Methods, processor.Method{
+								Loc:       locOf(fset, m.Pos()),
 								Signature: formatExpr(fset, m.Type),
 							})
 						}
@@ -117,7 +131,7 @@ func (p *Processor) Process(ctx context.Context, path string, src []byte) (*proc
 			fnDoc := docSynopsis(x.Doc)
 			if x.Recv != nil {
 				recv := formatRecv(fset, x.Recv)
-				m := processor.Method{Receiver: recv, Name: x.Name.Name, Doc: fnDoc, Signature: sig}
+				m := processor.Method{Receiver: recv, Name: x.Name.Name, Doc: fnDoc, Loc: locOf(fset, x.Name.Pos()), Signature: sig}
 				// Attach to struct if found
 				for i := range result.Structs {
 					if result.Structs[i].Name == baseType(recv) {
@@ -133,6 +147,7 @@ func (p *Processor) Process(ctx context.Context, path string, src []byte) (*proc
 				result.Functions = append(result.Functions, processor.Function{
 					Name:      x.Name.Name,
 					Doc:       fnDoc,
+					Loc:       locOf(fset, x.Name.Pos()),
 					Signature: sig,
 				})
 			}

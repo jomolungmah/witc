@@ -332,3 +332,55 @@ func TestJSON_Schema(t *testing.T) {
 		t.Errorf("package dependencies = %v, want [internal/svc]", deps)
 	}
 }
+
+func TestJSON_SymbolLocations(t *testing.T) {
+	sum := &Summary{
+		Root: "/tmp/example",
+		Packages: map[string]*processor.Result{
+			"internal/svc": {
+				Package:   "svc",
+				Functions: []processor.Function{{Name: "Do", Signature: "func()", Loc: processor.Location{File: "internal/svc/svc.go", Line: 12}}},
+				// A struct known only through its methods has no declaration site;
+				// its location must be omitted rather than emitted as a zero value.
+				Structs: []processor.Struct{{Name: "S"}},
+			},
+		},
+	}
+
+	out, err := JSON(sum)
+	if err != nil {
+		t.Fatalf("JSON: %v", err)
+	}
+
+	var got struct {
+		Packages []struct {
+			Functions []struct {
+				Name     string `json:"name"`
+				Location *struct {
+					File string `json:"file"`
+					Line int    `json:"line"`
+				} `json:"location"`
+			} `json:"functions"`
+			Structs []struct {
+				Name     string              `json:"name"`
+				Location *struct{ Line int } `json:"location"`
+			} `json:"structs"`
+		} `json:"packages"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if len(got.Packages) != 1 {
+		t.Fatalf("len(packages) = %d, want 1", len(got.Packages))
+	}
+	p := got.Packages[0]
+	if len(p.Functions) != 1 || p.Functions[0].Location == nil {
+		t.Fatalf("function location missing: %+v", p.Functions)
+	}
+	if loc := p.Functions[0].Location; loc.File != "internal/svc/svc.go" || loc.Line != 12 {
+		t.Errorf("function location = %s:%d, want internal/svc/svc.go:12", loc.File, loc.Line)
+	}
+	if len(p.Structs) != 1 || p.Structs[0].Location != nil {
+		t.Errorf("struct with unknown location should omit it, got %+v", p.Structs)
+	}
+}

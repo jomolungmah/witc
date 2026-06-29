@@ -4,12 +4,22 @@ import (
 	"encoding/json"
 	"sort"
 
+	"github.com/jomolungmah/witc/internal/processor"
 	goparser "github.com/jomolungmah/witc/internal/processor/go"
 )
 
+// jsonLoc converts a symbol location to its JSON form, returning nil when the
+// location is unknown (zero line) so the field is omitted.
+func jsonLoc(l processor.Location) *jsonLocation {
+	if l.Line == 0 {
+		return nil
+	}
+	return &jsonLocation{File: l.File, Line: l.Line}
+}
+
 // SchemaVersion identifies the JSON output schema. It is bumped when the shape
 // changes so consumers can detect compatibility. See docs/json-schema.md.
-const SchemaVersion = "1.0"
+const SchemaVersion = "1.1"
 
 // The json* types below define an explicit, stable output contract that is
 // intentionally decoupled from the internal parser/call-graph structs, so those
@@ -33,10 +43,11 @@ type jsonPackage struct {
 }
 
 type jsonStruct struct {
-	Name    string       `json:"name"`
-	Doc     string       `json:"doc,omitempty"`
-	Fields  []jsonField  `json:"fields,omitempty"`
-	Methods []jsonMethod `json:"methods,omitempty"`
+	Name     string        `json:"name"`
+	Doc      string        `json:"doc,omitempty"`
+	Location *jsonLocation `json:"location,omitempty"`
+	Fields   []jsonField   `json:"fields,omitempty"`
+	Methods  []jsonMethod  `json:"methods,omitempty"`
 }
 
 type jsonField struct {
@@ -44,23 +55,31 @@ type jsonField struct {
 	Type string `json:"type"`
 }
 
+type jsonLocation struct {
+	File string `json:"file"`
+	Line int    `json:"line"`
+}
+
 type jsonMethod struct {
-	Receiver  string `json:"receiver,omitempty"`
-	Name      string `json:"name"`
-	Doc       string `json:"doc,omitempty"`
-	Signature string `json:"signature"`
+	Receiver  string        `json:"receiver,omitempty"`
+	Name      string        `json:"name"`
+	Doc       string        `json:"doc,omitempty"`
+	Location  *jsonLocation `json:"location,omitempty"`
+	Signature string        `json:"signature"`
 }
 
 type jsonInterface struct {
-	Name    string       `json:"name"`
-	Doc     string       `json:"doc,omitempty"`
-	Methods []jsonMethod `json:"methods,omitempty"`
+	Name     string        `json:"name"`
+	Doc      string        `json:"doc,omitempty"`
+	Location *jsonLocation `json:"location,omitempty"`
+	Methods  []jsonMethod  `json:"methods,omitempty"`
 }
 
 type jsonFunction struct {
-	Name      string `json:"name"`
-	Doc       string `json:"doc,omitempty"`
-	Signature string `json:"signature"`
+	Name      string        `json:"name"`
+	Doc       string        `json:"doc,omitempty"`
+	Location  *jsonLocation `json:"location,omitempty"`
+	Signature string        `json:"signature"`
 }
 
 type jsonCallGraph struct {
@@ -130,24 +149,24 @@ func jsonPackages(sum *Summary) []jsonPackage {
 		}
 		p := jsonPackage{ImportPath: k, Doc: r.Doc}
 		for _, s := range r.Structs {
-			js := jsonStruct{Name: s.Name, Doc: s.Doc}
+			js := jsonStruct{Name: s.Name, Doc: s.Doc, Location: jsonLoc(s.Loc)}
 			for _, f := range s.Fields {
 				js.Fields = append(js.Fields, jsonField{Name: f.Name, Type: f.Type})
 			}
 			for _, m := range s.Methods {
-				js.Methods = append(js.Methods, jsonMethod{Receiver: m.Receiver, Name: m.Name, Doc: m.Doc, Signature: m.Signature})
+				js.Methods = append(js.Methods, jsonMethod{Receiver: m.Receiver, Name: m.Name, Doc: m.Doc, Location: jsonLoc(m.Loc), Signature: m.Signature})
 			}
 			p.Structs = append(p.Structs, js)
 		}
 		for _, iface := range r.Interfaces {
-			ji := jsonInterface{Name: iface.Name, Doc: iface.Doc}
+			ji := jsonInterface{Name: iface.Name, Doc: iface.Doc, Location: jsonLoc(iface.Loc)}
 			for _, m := range iface.Methods {
-				ji.Methods = append(ji.Methods, jsonMethod{Name: m.Name, Doc: m.Doc, Signature: m.Signature})
+				ji.Methods = append(ji.Methods, jsonMethod{Name: m.Name, Doc: m.Doc, Location: jsonLoc(m.Loc), Signature: m.Signature})
 			}
 			p.Interfaces = append(p.Interfaces, ji)
 		}
 		for _, fn := range r.Functions {
-			p.Functions = append(p.Functions, jsonFunction{Name: fn.Name, Doc: fn.Doc, Signature: fn.Signature})
+			p.Functions = append(p.Functions, jsonFunction{Name: fn.Name, Doc: fn.Doc, Location: jsonLoc(fn.Loc), Signature: fn.Signature})
 		}
 		pkgs = append(pkgs, p)
 	}

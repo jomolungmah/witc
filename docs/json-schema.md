@@ -5,13 +5,17 @@ versioned schema described here. The shape is deliberately decoupled from witc's
 internal types so they can be refactored without breaking consumers; any
 breaking change to this shape bumps `schemaVersion`.
 
-Current version: **`1.0`**
+Current version: **`1.1`**
+
+> **`1.1`** adds an optional `location` (`{ file, line }`) to each struct,
+> interface, method, and function, so consumers can jump straight to a symbol's
+> declaration. The change is additive; `1.0` consumers ignore the new field.
 
 ## Top level
 
 | Field | Type | Notes |
 |-------|------|-------|
-| `schemaVersion` | string | Schema version, e.g. `"1.0"`. Check this before parsing. |
+| `schemaVersion` | string | Schema version, e.g. `"1.1"`. Check this before parsing. |
 | `root` | string | Absolute path of the analyzed directory. |
 | `packages` | array of [Package](#package) | Sorted by `importPath`. |
 | `callGraph` | [CallGraph](#callgraph) \| absent | Omitted when no call graph is available. |
@@ -38,6 +42,7 @@ Test files (`_test.go`) are excluded unless `--include-tests` is passed.
 |-------|------|-------|
 | `name` | string | |
 | `doc` | string (optional) | First sentence of the doc comment. |
+| `location` | [Location](#location) (optional) | Declaration site. Omitted for a struct known only through its methods. |
 | `fields` | array of `{ name?, type }` (optional) | `name` omitted for embedded fields. |
 | `methods` | array of [Method](#method) (optional) | |
 
@@ -46,6 +51,7 @@ Test files (`_test.go`) are excluded unless `--include-tests` is passed.
 |-------|------|-------|
 | `name` | string | |
 | `doc` | string (optional) | |
+| `location` | [Location](#location) (optional) | Declaration site. |
 | `methods` | array of [Method](#method) (optional) | |
 
 ### Method
@@ -54,6 +60,7 @@ Test files (`_test.go`) are excluded unless `--include-tests` is passed.
 | `receiver` | string (optional) | e.g. `*Processor`. Empty for interface methods. |
 | `name` | string | |
 | `doc` | string (optional) | |
+| `location` | [Location](#location) (optional) | Declaration site. |
 | `signature` | string | e.g. `func(ctx context.Context) error`. |
 
 ### Function
@@ -61,7 +68,14 @@ Test files (`_test.go`) are excluded unless `--include-tests` is passed.
 |-------|------|-------|
 | `name` | string | |
 | `doc` | string (optional) | |
+| `location` | [Location](#location) (optional) | Declaration site. |
 | `signature` | string | |
+
+### Location
+| Field | Type | Notes |
+|-------|------|-------|
+| `file` | string | Slash-separated path relative to the analyzed root. |
+| `line` | int | 1-based line of the symbol's name. |
 
 ## CallGraph
 
@@ -109,14 +123,14 @@ Built with full type information; nodes are fully-qualified
 
 ```json
 {
-  "schemaVersion": "1.0",
+  "schemaVersion": "1.1",
   "root": "/path/to/project",
   "packages": [
     {
       "importPath": "internal/scanner",
       "doc": "Package scanner discovers source files.",
       "functions": [
-        { "name": "Scan", "doc": "Scan walks the directory tree…", "signature": "func(root string, includeTests bool) ([]File, error)" }
+        { "name": "Scan", "doc": "Scan walks the directory tree…", "location": { "file": "internal/scanner/scanner.go", "line": 28 }, "signature": "func(root string, includeTests bool) ([]File, error)" }
       ]
     }
   ],

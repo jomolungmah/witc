@@ -1,9 +1,19 @@
 package processor
 
+// Location is the source position of a symbol, relative to the summary root.
+// A zero Line means the location is unknown (e.g. a struct known only through
+// its methods, with no declaration in the scanned files).
+type Location struct {
+	File   string // slash-separated path relative to the summary root
+	Line   int
+	Column int
+}
+
 // Struct represents a struct type.
 type Struct struct {
 	Name    string
 	Doc     string // first sentence of the doc comment, if any
+	Loc     Location
 	Fields  []Field
 	Methods []Method
 }
@@ -12,6 +22,7 @@ type Struct struct {
 type Interface struct {
 	Name    string
 	Doc     string // first sentence of the doc comment, if any
+	Loc     Location
 	Methods []Method
 }
 
@@ -19,6 +30,7 @@ type Interface struct {
 type Function struct {
 	Name      string
 	Doc       string // first sentence of the doc comment, if any
+	Loc       Location
 	Signature string
 }
 
@@ -27,6 +39,7 @@ type Method struct {
 	Receiver  string
 	Name      string
 	Doc       string // first sentence of the doc comment, if any
+	Loc       Location
 	Signature string
 }
 

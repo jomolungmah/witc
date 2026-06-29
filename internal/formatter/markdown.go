@@ -399,6 +399,15 @@ func centrality(cg *goparser.CallGraph, qualified string) int {
 	return 0
 }
 
+// locSuffix renders a terse " — file:line" pointer for a symbol heading, or ""
+// when the location is unknown. It lets an agent jump straight to the source.
+func locSuffix(loc processor.Location) string {
+	if loc.Line == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" — %s:%d", loc.File, loc.Line)
+}
+
 func renderStruct(r *processor.Result, s processor.Struct, cg *goparser.CallGraph, includeInlineCalls bool) string {
 	var b strings.Builder
 	if len(s.Fields) > 0 {
@@ -410,15 +419,15 @@ func renderStruct(r *processor.Result, s processor.Struct, cg *goparser.CallGrap
 				fieldStrs = append(fieldStrs, f.Type)
 			}
 		}
-		b.WriteString(fmt.Sprintf("- `type %s struct { %s }`\n", s.Name, strings.Join(fieldStrs, "; ")))
+		b.WriteString(fmt.Sprintf("- `type %s struct { %s }`%s\n", s.Name, strings.Join(fieldStrs, "; "), locSuffix(s.Loc)))
 	} else if len(s.Methods) > 0 {
-		b.WriteString(fmt.Sprintf("- `type %s struct`\n", s.Name))
+		b.WriteString(fmt.Sprintf("- `type %s struct`%s\n", s.Name, locSuffix(s.Loc)))
 	}
 	if len(s.Fields) > 0 || len(s.Methods) > 0 {
 		writeDoc(&b, s.Doc, "  ")
 	}
 	for _, m := range s.Methods {
-		b.WriteString(fmt.Sprintf("  - `func (%s) %s%s`\n", m.Receiver, m.Name, stripFuncKeyword(m.Signature)))
+		b.WriteString(fmt.Sprintf("  - `func (%s) %s%s`%s\n", m.Receiver, m.Name, stripFuncKeyword(m.Signature), locSuffix(m.Loc)))
 		writeDoc(&b, m.Doc, "    ")
 		if includeInlineCalls {
 			writeTypedCalls(&b, cg, r.Package+".("+m.Receiver+")."+m.Name, "    ")
@@ -438,9 +447,9 @@ func renderInterface(iface processor.Interface) string {
 				methStrs = append(methStrs, m.Signature)
 			}
 		}
-		b.WriteString(fmt.Sprintf("- `type %s interface { %s }`\n", iface.Name, strings.Join(methStrs, "; ")))
+		b.WriteString(fmt.Sprintf("- `type %s interface { %s }`%s\n", iface.Name, strings.Join(methStrs, "; "), locSuffix(iface.Loc)))
 	} else {
-		b.WriteString(fmt.Sprintf("- `type %s interface`\n", iface.Name))
+		b.WriteString(fmt.Sprintf("- `type %s interface`%s\n", iface.Name, locSuffix(iface.Loc)))
 	}
 	writeDoc(&b, iface.Doc, "  ")
 	return b.String()
@@ -454,7 +463,7 @@ func renderFunc(r *processor.Result, fn processor.Function, cg *goparser.CallGra
 	} else {
 		sig = "func " + fn.Name + " " + sig
 	}
-	b.WriteString(fmt.Sprintf("- `%s`\n", sig))
+	b.WriteString(fmt.Sprintf("- `%s`%s\n", sig, locSuffix(fn.Loc)))
 	writeDoc(&b, fn.Doc, "  ")
 	if includeInlineCalls {
 		writeTypedCalls(&b, cg, r.Package+"."+fn.Name, "  ")
@@ -676,4 +685,3 @@ func deduplicateStrings(s []string) []string {
 
 	return result
 }
-
