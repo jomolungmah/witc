@@ -38,6 +38,37 @@ witc summarize . --no-structure        # omit the file tree
 witc summarize . --include-tests       # include _test.go files
 ```
 
+## Querying without loading the full summary
+
+`summarize` is for initial orientation, but pasting the whole summary into an
+agent's context is wasteful when it only needs to find one symbol. Instead,
+build a cached index once and run targeted queries that return just the matching
+slice — the search happens in the CLI, not the context window:
+
+```bash
+witc index                  # build/refresh .witc/index.json (no-op if unchanged)
+
+witc find Scan              # symbol(s): file:line, signature, first-sentence doc
+witc where Markdown         # just the file:line (cheapest possible)
+witc callers ComputeKey     # in-module functions that call it
+witc callees runIndex       # in-module functions it calls
+witc package scanner        # one package's API surface
+```
+
+Queries auto-build the index if it is missing or stale, so `index` is optional.
+Names match exactly, as `pkg.Name`, or as a case-insensitive substring; all
+matches are listed when ambiguous. Add `--json` for structured output. The
+`.witc/` directory is local and should be git-ignored.
+
+| Command | Returns |
+|---------|---------|
+| `witc index [path]` | Build/refresh the cached index (`--force` to rebuild) |
+| `witc find <name>` | Matching symbols with `file:line`, signature, and doc |
+| `witc where <name>` | Bare `file:line` for each match |
+| `witc callers <func>` | Functions that call it |
+| `witc callees <func>` | Functions it calls |
+| `witc package <path>` | One package's API surface |
+
 ## Features
 
 ### Type-checked call graph
@@ -133,4 +164,5 @@ go install github.com/jomolungmah/witc/cmd/witc@latest
 This repository ships a skill for coding agents at
 [`.opencode/skill/witc/SKILL.md`](.opencode/skill/witc/SKILL.md) (opencode). It
 tells an agent to run `witc summarize` to orient itself in an unfamiliar Go
-codebase before reading or editing.
+codebase, then prefer `witc find`/`where` for targeted lookups so it can locate
+code without loading the whole summary into context.

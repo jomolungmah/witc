@@ -1,6 +1,6 @@
 ---
 name: witc
-description: Summarize a Go codebase (structure, API surface with docs, type-checked call graph, architecture, metrics) to get oriented before reading or editing. Use when you have little or no context about a Go project, or need to find where something lives. Supports a token budget so the summary fits your context window.
+description: Summarize a Go codebase (structure, API surface with docs, type-checked call graph, architecture, metrics) to get oriented before reading or editing, then query it for specific symbols without loading the whole summary. Use when you have little or no context about a Go project, or need to find where something lives. Supports a token budget so the summary fits your context window.
 license: MIT
 ---
 
@@ -58,6 +58,25 @@ witc summarize . --include-tests          # also cover _test.go files
 
 Tip: when you only need to know what a project is and where things live, start
 with `--detail medium` (or `--detail low --max-tokens N` for a strict budget).
+
+## Targeted lookups (cheaper than a full summary)
+
+Once oriented, **do not re-run `summarize` to find one thing.** Use the query
+commands: they read a cached index and print only the matching slice, so you
+spend a few tokens instead of re-loading the whole summary. They auto-build the
+index on first use and refresh it when the source changes.
+
+```bash
+witc find Scan            # symbol(s): file:line, signature, first-sentence doc
+witc where Markdown       # just the file:line — jump straight there
+witc callers ComputeKey   # who calls this function (in-module)
+witc callees runIndex     # what this function calls
+witc package scanner      # one package's API surface
+```
+
+Names match exactly, as `pkg.Name`, or as a case-insensitive substring; all
+matches are listed when ambiguous. Add `--json` for structured output. Reach for
+`find`/`where` whenever you would otherwise grep for a definition.
 
 ## Reading the output (markdown)
 

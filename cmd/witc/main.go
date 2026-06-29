@@ -32,6 +32,9 @@ func main() {
 	rootCmd := &cobra.Command{
 		Use:   "witc",
 		Short: "Summarize codebases for LLM coding agents",
+		// Keep failures to a one-line "Error: ..." rather than dumping usage,
+		// which matters for the query commands that exit non-zero on no match.
+		SilenceUsage: true,
 	}
 
 	summarizeCmd := &cobra.Command{
@@ -68,6 +71,10 @@ func main() {
 	indexCmd.Flags().CountVarP(&verbosity, "verbose", "v", "Increase verbosity (repeatable); see 'summarize --help'")
 	indexCmd.Flags().BoolVar(&indexForce, "force", false, "Rebuild even when the cached index is up to date")
 	rootCmd.AddCommand(indexCmd)
+
+	for _, c := range queryCommands() {
+		rootCmd.AddCommand(c)
+	}
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
