@@ -67,9 +67,10 @@ func goLanguage(o buildOptions) language {
 }
 
 // tsLanguage covers TypeScript and JavaScript, React dialects included. Its
-// call-graph builder resolves imports (relative, barrel re-exports, tsconfig
-// aliases) so calls and JSX renders connect across files; on error the AST
-// aggregate over per-file records takes over.
+// call-graph builder has two precise tiers: the type-checking node sidecar
+// (resolves member calls through inferred types) when node and a project
+// typescript install are available, else the import-resolving tree-sitter
+// builder; on error the AST aggregate over per-file records takes over.
 func tsLanguage() language {
 	exts := []string{".ts", ".tsx", ".js", ".jsx"}
 	return language{
@@ -84,6 +85,17 @@ func tsLanguage() language {
 			paths := make([]string, len(files))
 			for i, f := range files {
 				paths[i] = f.Path
+			}
+			var logf func(format string, args ...any)
+			if o.verbose {
+				logf = func(format string, args ...any) {
+					fmt.Fprintf(os.Stderr, "witc: "+format+"\n", args...)
+				}
+			}
+			if g, err := tsparser.BuildTypedCallGraph(root, paths, logf); err == nil {
+				return g, nil
+			} else if logf != nil {
+				logf("typescript sidecar unavailable (%v); using import-resolved builder", err)
 			}
 			return tsparser.BuildCallGraph(root, paths)
 		},

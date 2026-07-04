@@ -183,9 +183,11 @@ func architectureSection(sum *Summary) string {
 	sort.Strings(relKeys)
 
 	fullToRel := pkgPathMap(sum.CallGraph, relKeys)
-	relToFull := make(map[string]string, len(fullToRel))
+	// Several graph packages can share one display path (a Go package whose
+	// directory also holds JS files); their dependencies are unioned.
+	relToFulls := make(map[string][]string, len(fullToRel))
 	for full, rel := range fullToRel {
-		relToFull[rel] = full
+		relToFulls[rel] = append(relToFulls[rel], full)
 	}
 	deps := internalPackageDeps(sum.CallGraph)
 
@@ -209,17 +211,21 @@ func architectureSection(sum *Summary) string {
 		}
 		b.WriteString(fmt.Sprintf(" (%d type(s), %d func(s))", len(r.Structs)+len(r.Interfaces), len(r.Functions)))
 
-		if full := relToFull[rel]; full != "" {
-			var depRels []string
+		depSet := map[string]bool{}
+		for _, full := range relToFulls[rel] {
 			for dep := range deps[full] {
-				if dr := fullToRel[dep]; dr != "" {
-					depRels = append(depRels, dr)
+				if dr := fullToRel[dep]; dr != "" && dr != rel {
+					depSet[dr] = true
 				}
 			}
-			if len(depRels) > 0 {
-				sort.Strings(depRels)
-				b.WriteString(" → depends on: " + joinCode(depRels))
+		}
+		if len(depSet) > 0 {
+			depRels := make([]string, 0, len(depSet))
+			for dr := range depSet {
+				depRels = append(depRels, dr)
 			}
+			sort.Strings(depRels)
+			b.WriteString(" → depends on: " + joinCode(depRels))
 		}
 		b.WriteString("\n")
 	}

@@ -8,11 +8,16 @@ fits a context window.
 
 Understands Go and TypeScript/JavaScript (including React: `.tsx`/`.jsx`).
 Go gets the full type-checked call graph. TS/JS gets the API surface (classes,
-interfaces, type aliases, enums, functions with TSDoc) and an import-resolved
-call graph: relative imports, barrel re-exports, and tsconfig `baseUrl`/`paths`
-aliases connect calls, `new` expressions, and JSX render edges across files,
-with npm packages tracked as external dependencies. Building from source
-requires a C compiler (`cgo`) for the tree-sitter parsers.
+interfaces, type aliases, enums, functions with TSDoc) and a call graph built
+by the best available tier: when `node` is on the PATH and the project has
+`node_modules/typescript` installed, witc runs the TypeScript compiler as a
+sidecar and resolves calls through inferred types (`const c = createClient();
+c.getUser()` connects to the real method). Otherwise an import-resolving
+builder takes over: relative imports, barrel re-exports, and tsconfig
+`baseUrl`/`paths` aliases connect calls, `new` expressions, and JSX render
+edges across files. Either way, npm packages are tracked as external
+dependencies. Building from source requires a C compiler (`cgo`) for the
+tree-sitter parsers; node is optional and only enables the typed tier.
 
 ## Installation
 

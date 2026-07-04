@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/debug"
+	"slices"
 
 	"github.com/jomolungmah/witc/internal/callgraph"
 	"github.com/jomolungmah/witc/internal/formatter"
@@ -203,6 +205,20 @@ func resultsForLanguage(sum *formatter.Summary, lang string) []*processor.Result
 	return out
 }
 
+// cacheSalt versions the index cache key: the JSON schema plus this build's
+// identity, so upgrading witc rebuilds indexes even when the schema is
+// unchanged (a new call-graph tier changes the content, not the shape).
+func cacheSalt() string {
+	salt := formatter.SchemaVersion
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		salt += "|" + bi.Main.Version
+		if i := slices.IndexFunc(bi.Settings, func(s debug.BuildSetting) bool { return s.Key == "vcs.revision" }); i >= 0 {
+			salt += "+" + bi.Settings[i].Value
+		}
+	}
+	return salt
+}
+
 func runIndex(cmd *cobra.Command, args []string) error {
 	root, err := resolveRoot(args)
 	if err != nil {
@@ -215,7 +231,7 @@ func runIndex(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("scan: %w", err)
 	}
-	key, err := index.ComputeKey(root, files, formatter.SchemaVersion)
+	key, err := index.ComputeKey(root, files, cacheSalt())
 	if err != nil {
 		return fmt.Errorf("compute cache key: %w", err)
 	}

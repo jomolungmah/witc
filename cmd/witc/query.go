@@ -70,7 +70,7 @@ func ensureIndex(args []string) (*index.Index, error) {
 	if err != nil {
 		return nil, fmt.Errorf("scan: %w", err)
 	}
-	key, err := index.ComputeKey(root, files, formatter.SchemaVersion)
+	key, err := index.ComputeKey(root, files, cacheSalt())
 	if err != nil {
 		return nil, fmt.Errorf("compute cache key: %w", err)
 	}
