@@ -414,23 +414,23 @@ func isGoLike(r *processor.Result) bool {
 	return r.Language == "go" || r.Language == ""
 }
 
-// funcQualified returns the call-graph node name for a package-level function:
-// Go's typed graph qualifies by package; other languages' AST graphs use the
-// bare name.
+// funcQualified returns the call-graph node name for a package-level function.
+// Every language's precise graph qualifies nodes as "pkg.Fn"; TS files at the
+// module root have no package prefix.
 func funcQualified(r *processor.Result, name string) string {
-	if isGoLike(r) {
-		return r.Package + "." + name
+	if r.Package == "" {
+		return name
 	}
-	return name
+	return r.Package + "." + name
 }
 
-// methodQualified is funcQualified for methods, using Go's "(recv).Name" form
-// or the "Class.method" form other languages' AST graphs produce.
+// methodQualified is funcQualified for methods, using Go's "pkg.(recv).Name"
+// form or the "pkg.Class.method" form the TS builder produces.
 func methodQualified(r *processor.Result, m processor.Method) string {
 	if isGoLike(r) {
 		return r.Package + ".(" + m.Receiver + ")." + m.Name
 	}
-	return m.Receiver + "." + m.Name
+	return funcQualified(r, m.Receiver+"."+m.Name)
 }
 
 // fieldStrings renders fields as "name type" (Go) or "name: type" (TS/JS).

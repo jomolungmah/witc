@@ -8,6 +8,7 @@ import (
 	"github.com/jomolungmah/witc/internal/processor"
 	goparser "github.com/jomolungmah/witc/internal/processor/go"
 	tsparser "github.com/jomolungmah/witc/internal/processor/ts"
+	"github.com/jomolungmah/witc/internal/scanner"
 )
 
 // language bundles what witc needs to support one source language: the
@@ -65,13 +66,26 @@ func goLanguage(o buildOptions) language {
 	}
 }
 
-// tsLanguage covers TypeScript and JavaScript, React dialects included. It has
-// no precise call-graph builder yet, so the AST aggregate (identifier calls,
-// new expressions, and JSX render edges) is its call-graph tier.
+// tsLanguage covers TypeScript and JavaScript, React dialects included. Its
+// call-graph builder resolves imports (relative, barrel re-exports, tsconfig
+// aliases) so calls and JSX renders connect across files; on error the AST
+// aggregate over per-file records takes over.
 func tsLanguage() language {
+	exts := []string{".ts", ".tsx", ".js", ".jsx"}
 	return language{
 		name:      "typescript",
-		exts:      []string{".ts", ".tsx", ".js", ".jsx"},
+		exts:      exts,
 		processor: &tsparser.Processor{},
+		buildCallGraph: func(root string, o buildOptions) (*callgraph.CallGraph, error) {
+			files, err := scanner.Scan(root, scanner.Options{Extensions: exts, IncludeTests: o.includeTests})
+			if err != nil {
+				return nil, err
+			}
+			paths := make([]string, len(files))
+			for i, f := range files {
+				paths[i] = f.Path
+			}
+			return tsparser.BuildCallGraph(root, paths)
+		},
 	}
 }

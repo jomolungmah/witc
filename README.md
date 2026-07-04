@@ -7,28 +7,33 @@ markdown or a versioned JSON schema — with **token budgeting** so the output
 fits a context window.
 
 Understands Go and TypeScript/JavaScript (including React: `.tsx`/`.jsx`).
-Go gets the full type-checked call graph; TS/JS gets the API surface (classes,
-interfaces, type aliases, enums, functions with TSDoc) and an AST-level call
-graph that includes JSX render edges and hook calls. Building from source
+Go gets the full type-checked call graph. TS/JS gets the API surface (classes,
+interfaces, type aliases, enums, functions with TSDoc) and an import-resolved
+call graph: relative imports, barrel re-exports, and tsconfig `baseUrl`/`paths`
+aliases connect calls, `new` expressions, and JSX render edges across files,
+with npm packages tracked as external dependencies. Building from source
 requires a C compiler (`cgo`) for the tree-sitter parsers.
 
 ## Installation
 
-Install a binary via
+Install the binary via
 
-```
-go install github.com/jomolungmah/witc/main/cmd@latest
-```
-
-Then copy a skill file to agent folder of your choosing, here's an example for OpenCode:
-
-```
-mkdir -p ~/.config/opencode/skills/witc \                                                                                                │
-curl -sSL https://raw.githubusercontent.com/jomolungmah/witc/refs/heads/main/.opencode/skill/witc/SKILL.md -o ~/.config/opencode/skills/w
-itc/SKILL.md
+```bash
+go install github.com/jomolungmah/witc/cmd/witc@latest
 ```
 
-Also make sure that ~/go/bin is in your $PATH so installed binary will be accessible in your shell.
+Building requires a C compiler on the PATH (the TypeScript/JavaScript parsers
+use cgo). Make sure `$(go env GOPATH)/bin` (usually `~/go/bin`) is in your
+`$PATH` so the installed binary is accessible in your shell.
+
+Then copy the skill file to the agent folder of your choosing; here's an
+example for OpenCode:
+
+```bash
+mkdir -p ~/.config/opencode/skills/witc && \
+  curl -sSL https://raw.githubusercontent.com/jomolungmah/witc/refs/heads/main/.opencode/skill/witc/SKILL.md \
+    -o ~/.config/opencode/skills/witc/SKILL.md
+```
 
 ## Usage
 
@@ -39,7 +44,7 @@ witc summarize . --format json         # versioned JSON (see docs/json-schema.md
 witc summarize . --detail low          # exported API surface only
 witc summarize . --max-tokens 4000     # cap output to ~4000 tokens
 witc summarize . --no-structure        # omit the file tree
-witc summarize . --include-tests       # include _test.go files
+witc summarize . --include-tests       # include test files (_test.go, *.test.*, *.spec.*)
 ```
 
 ## Querying without loading the full summary
@@ -120,7 +125,7 @@ declared functions and methods:
 | `--detail` | `high` | `low` (API only), `medium` (+call graph, metrics, architecture), `high` (everything) |
 | `--max-tokens` | `0` | Cap estimated output size in tokens (0 = unlimited) |
 | `--no-structure` | `false` | Omit the file tree |
-| `--include-tests` | `false` | Include `_test.go` files |
+| `--include-tests` | `false` | Include test files (`_test.go`, `*.test.*`, `*.spec.*`, `__tests__/`) |
 | `--exclude-generated` | `false` | Skip Go files marked as generated |
 | `--no-progress` | `false` | Disable the stderr progress bar/spinner (auto-off when stderr isn't a terminal) |
 | `--verbose`, `-v` | `false` | Increase verbosity (repeatable). `-v` logs call-graph build phase timings and per-package counts to stderr; `-vv` also traces the `go/packages` driver (`go list`) invocations and timing |
@@ -157,16 +162,10 @@ Markdown output (at `--detail high`) contains, in order:
 The JSON format emits the same information under a documented, versioned schema
 — see [`docs/json-schema.md`](docs/json-schema.md).
 
-## Installation
-
-```bash
-go install github.com/jomolungmah/witc/cmd/witc@latest
-```
-
 ## Skill
 
 This repository ships a skill for coding agents at
 [`.opencode/skill/witc/SKILL.md`](.opencode/skill/witc/SKILL.md) (opencode). It
-tells an agent to run `witc summarize` to orient itself in an unfamiliar Go
+tells an agent to run `witc summarize` to orient itself in an unfamiliar
 codebase, then prefer `witc find`/`where` for targeted lookups so it can locate
 code without loading the whole summary into context.
