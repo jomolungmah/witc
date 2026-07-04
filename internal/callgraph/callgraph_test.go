@@ -1,4 +1,4 @@
-package goparser
+package callgraph
 
 import (
 	"testing"

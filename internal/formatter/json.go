@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"sort"
 
+	"github.com/jomolungmah/witc/internal/callgraph"
 	"github.com/jomolungmah/witc/internal/processor"
-	goparser "github.com/jomolungmah/witc/internal/processor/go"
 )
 
 // jsonLoc converts a symbol location to its JSON form, returning nil when the
@@ -19,7 +19,7 @@ func jsonLoc(l processor.Location) *jsonLocation {
 
 // SchemaVersion identifies the JSON output schema. It is bumped when the shape
 // changes so consumers can detect compatibility. See docs/json-schema.md.
-const SchemaVersion = "1.1"
+const SchemaVersion = "1.2"
 
 // The json* types below define an explicit, stable output contract that is
 // intentionally decoupled from the internal parser/call-graph structs, so those
@@ -36,6 +36,7 @@ type jsonOutput struct {
 
 type jsonPackage struct {
 	ImportPath string          `json:"importPath"`
+	Language   string          `json:"language,omitempty"`
 	Doc        string          `json:"doc,omitempty"`
 	Structs    []jsonStruct    `json:"structs,omitempty"`
 	Interfaces []jsonInterface `json:"interfaces,omitempty"`
@@ -44,6 +45,7 @@ type jsonPackage struct {
 
 type jsonStruct struct {
 	Name     string        `json:"name"`
+	Exported bool          `json:"exported"`
 	Doc      string        `json:"doc,omitempty"`
 	Location *jsonLocation `json:"location,omitempty"`
 	Fields   []jsonField   `json:"fields,omitempty"`
@@ -63,6 +65,7 @@ type jsonLocation struct {
 type jsonMethod struct {
 	Receiver  string        `json:"receiver,omitempty"`
 	Name      string        `json:"name"`
+	Exported  bool          `json:"exported"`
 	Doc       string        `json:"doc,omitempty"`
 	Location  *jsonLocation `json:"location,omitempty"`
 	Signature string        `json:"signature"`
@@ -70,13 +73,17 @@ type jsonMethod struct {
 
 type jsonInterface struct {
 	Name     string        `json:"name"`
+	Exported bool          `json:"exported"`
 	Doc      string        `json:"doc,omitempty"`
 	Location *jsonLocation `json:"location,omitempty"`
+	Fields   []jsonField   `json:"fields,omitempty"`
 	Methods  []jsonMethod  `json:"methods,omitempty"`
+	Alias    string        `json:"alias,omitempty"`
 }
 
 type jsonFunction struct {
 	Name      string        `json:"name"`
+	Exported  bool          `json:"exported"`
 	Doc       string        `json:"doc,omitempty"`
 	Location  *jsonLocation `json:"location,omitempty"`
 	Signature string        `json:"signature"`
@@ -147,33 +154,36 @@ func jsonPackages(sum *Summary) []jsonPackage {
 		if r == nil {
 			continue
 		}
-		p := jsonPackage{ImportPath: k, Doc: r.Doc}
+		p := jsonPackage{ImportPath: k, Language: r.Language, Doc: r.Doc}
 		for _, s := range r.Structs {
-			js := jsonStruct{Name: s.Name, Doc: s.Doc, Location: jsonLoc(s.Loc)}
+			js := jsonStruct{Name: s.Name, Exported: s.Exported, Doc: s.Doc, Location: jsonLoc(s.Loc)}
 			for _, f := range s.Fields {
 				js.Fields = append(js.Fields, jsonField{Name: f.Name, Type: f.Type})
 			}
 			for _, m := range s.Methods {
-				js.Methods = append(js.Methods, jsonMethod{Receiver: m.Receiver, Name: m.Name, Doc: m.Doc, Location: jsonLoc(m.Loc), Signature: m.Signature})
+				js.Methods = append(js.Methods, jsonMethod{Receiver: m.Receiver, Name: m.Name, Exported: m.Exported, Doc: m.Doc, Location: jsonLoc(m.Loc), Signature: m.Signature})
 			}
 			p.Structs = append(p.Structs, js)
 		}
 		for _, iface := range r.Interfaces {
-			ji := jsonInterface{Name: iface.Name, Doc: iface.Doc, Location: jsonLoc(iface.Loc)}
+			ji := jsonInterface{Name: iface.Name, Exported: iface.Exported, Doc: iface.Doc, Location: jsonLoc(iface.Loc), Alias: iface.Alias}
+			for _, f := range iface.Fields {
+				ji.Fields = append(ji.Fields, jsonField{Name: f.Name, Type: f.Type})
+			}
 			for _, m := range iface.Methods {
-				ji.Methods = append(ji.Methods, jsonMethod{Name: m.Name, Doc: m.Doc, Location: jsonLoc(m.Loc), Signature: m.Signature})
+				ji.Methods = append(ji.Methods, jsonMethod{Name: m.Name, Exported: m.Exported, Doc: m.Doc, Location: jsonLoc(m.Loc), Signature: m.Signature})
 			}
 			p.Interfaces = append(p.Interfaces, ji)
 		}
 		for _, fn := range r.Functions {
-			p.Functions = append(p.Functions, jsonFunction{Name: fn.Name, Doc: fn.Doc, Location: jsonLoc(fn.Loc), Signature: fn.Signature})
+			p.Functions = append(p.Functions, jsonFunction{Name: fn.Name, Exported: fn.Exported, Doc: fn.Doc, Location: jsonLoc(fn.Loc), Signature: fn.Signature})
 		}
 		pkgs = append(pkgs, p)
 	}
 	return pkgs
 }
 
-func jsonCallGraphOf(cg *goparser.CallGraph) *jsonCallGraph {
+func jsonCallGraphOf(cg *callgraph.CallGraph) *jsonCallGraph {
 	names := make([]string, 0, len(cg.Functions))
 	for n := range cg.Functions {
 		names = append(names, n)
@@ -193,8 +203,8 @@ func jsonCallGraphOf(cg *goparser.CallGraph) *jsonCallGraph {
 	return out
 }
 
-func jsonMetricsOf(cg *goparser.CallGraph) *jsonMetrics {
-	m := goparser.CalculateMetrics(cg)
+func jsonMetricsOf(cg *callgraph.CallGraph) *jsonMetrics {
+	m := callgraph.CalculateMetrics(cg)
 	return &jsonMetrics{
 		TotalFunctions:        m.TotalFunctions,
 		TotalCalls:            m.TotalCalls,

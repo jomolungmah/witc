@@ -6,7 +6,11 @@ derives package-level architecture, computes metrics, and renders it all as
 markdown or a versioned JSON schema — with **token budgeting** so the output
 fits a context window.
 
-Go only, for now.
+Understands Go and TypeScript/JavaScript (including React: `.tsx`/`.jsx`).
+Go gets the full type-checked call graph; TS/JS gets the API surface (classes,
+interfaces, type aliases, enums, functions with TSDoc) and an AST-level call
+graph that includes JSX render edges and hook calls. Building from source
+requires a C compiler (`cgo`) for the tree-sitter parsers.
 
 ## Installation
 

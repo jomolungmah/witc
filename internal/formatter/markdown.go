@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/jomolungmah/witc/internal/callgraph"
 	"github.com/jomolungmah/witc/internal/processor"
-	goparser "github.com/jomolungmah/witc/internal/processor/go"
 )
 
 // stripFuncKeyword removes a leading "func" keyword from a stored signature so
@@ -27,7 +27,7 @@ func writeDoc(b *strings.Builder, doc, indent string) {
 // writeTypedCalls renders a function's internal callees inline, looked up in the
 // type-checked graph by its qualified name (e.g. "pkg.Fn" or "pkg.(*T).M").
 // It renders nothing when the name isn't a node (e.g. under the AST fallback).
-func writeTypedCalls(b *strings.Builder, cg *goparser.CallGraph, qualified, indent string) {
+func writeTypedCalls(b *strings.Builder, cg *callgraph.CallGraph, qualified, indent string) {
 	info := cg.GetFunction(qualified)
 	if info == nil || len(info.Callees) == 0 {
 		return
@@ -229,7 +229,7 @@ func architectureSection(sum *Summary) string {
 
 // internalPackageDeps derives in-module package → package edges from the call
 // graph: a function calling into another module package creates a dependency.
-func internalPackageDeps(cg *goparser.CallGraph) map[string]map[string]bool {
+func internalPackageDeps(cg *callgraph.CallGraph) map[string]map[string]bool {
 	deps := make(map[string]map[string]bool)
 	if cg == nil {
 		return deps
@@ -252,7 +252,7 @@ func internalPackageDeps(cg *goparser.CallGraph) map[string]map[string]bool {
 
 // pkgPathMap maps each full import path in the call graph to the matching
 // display path used by the API surface (e.g. the module-relative directory).
-func pkgPathMap(cg *goparser.CallGraph, relKeys []string) map[string]string {
+func pkgPathMap(cg *callgraph.CallGraph, relKeys []string) map[string]string {
 	m := make(map[string]string)
 	if cg == nil {
 		return m
@@ -339,19 +339,19 @@ func apiSection(sum *Summary, includeInlineCalls, collapseUnexported bool, budge
 // symbolEntries renders each symbol in a package as a standalone block, ordered
 // by importance so the least useful are the first to be truncated: types, then
 // exported functions by centrality, then unexported functions by centrality.
-func symbolEntries(r *processor.Result, cg *goparser.CallGraph, includeInlineCalls, collapseUnexported bool) []string {
+func symbolEntries(r *processor.Result, cg *callgraph.CallGraph, includeInlineCalls, collapseUnexported bool) []string {
 	var entries []string
 
 	for _, s := range r.Structs {
 		entries = append(entries, renderStruct(r, s, cg, includeInlineCalls))
 	}
 	for _, iface := range r.Interfaces {
-		entries = append(entries, renderInterface(iface))
+		entries = append(entries, renderInterface(r, iface))
 	}
 
 	var exported, unexported []processor.Function
 	for _, fn := range r.Functions {
-		if isExported(fn.Name) {
+		if fn.Exported {
 			exported = append(exported, fn)
 		} else {
 			unexported = append(unexported, fn)
@@ -359,8 +359,8 @@ func symbolEntries(r *processor.Result, cg *goparser.CallGraph, includeInlineCal
 	}
 	byCentrality := func(fns []processor.Function) {
 		sort.SliceStable(fns, func(i, j int) bool {
-			ci := centrality(cg, r.Package+"."+fns[i].Name)
-			cj := centrality(cg, r.Package+"."+fns[j].Name)
+			ci := centrality(cg, funcQualified(r, fns[i].Name))
+			cj := centrality(cg, funcQualified(r, fns[j].Name))
 			if ci != cj {
 				return ci > cj
 			}
@@ -389,7 +389,7 @@ func symbolEntries(r *processor.Result, cg *goparser.CallGraph, includeInlineCal
 }
 
 // centrality scores a function's importance as its total call-graph degree.
-func centrality(cg *goparser.CallGraph, qualified string) int {
+func centrality(cg *callgraph.CallGraph, qualified string) int {
 	if cg == nil {
 		return 0
 	}
@@ -408,70 +408,133 @@ func locSuffix(loc processor.Location) string {
 	return fmt.Sprintf(" — %s:%d", loc.File, loc.Line)
 }
 
-func renderStruct(r *processor.Result, s processor.Struct, cg *goparser.CallGraph, includeInlineCalls bool) string {
-	var b strings.Builder
-	if len(s.Fields) > 0 {
-		fieldStrs := make([]string, 0, len(s.Fields))
-		for _, f := range s.Fields {
-			if f.Name != "" {
-				fieldStrs = append(fieldStrs, f.Name+" "+f.Type)
-			} else {
-				fieldStrs = append(fieldStrs, f.Type)
-			}
-		}
-		b.WriteString(fmt.Sprintf("- `type %s struct { %s }`%s\n", s.Name, strings.Join(fieldStrs, "; "), locSuffix(s.Loc)))
-	} else if len(s.Methods) > 0 {
-		b.WriteString(fmt.Sprintf("- `type %s struct`%s\n", s.Name, locSuffix(s.Loc)))
+// isGoLike reports whether a package renders with Go syntax. An empty language
+// means a result predating the language field and keeps the Go rendering.
+func isGoLike(r *processor.Result) bool {
+	return r.Language == "go" || r.Language == ""
+}
+
+// funcQualified returns the call-graph node name for a package-level function:
+// Go's typed graph qualifies by package; other languages' AST graphs use the
+// bare name.
+func funcQualified(r *processor.Result, name string) string {
+	if isGoLike(r) {
+		return r.Package + "." + name
 	}
+	return name
+}
+
+// methodQualified is funcQualified for methods, using Go's "(recv).Name" form
+// or the "Class.method" form other languages' AST graphs produce.
+func methodQualified(r *processor.Result, m processor.Method) string {
+	if isGoLike(r) {
+		return r.Package + ".(" + m.Receiver + ")." + m.Name
+	}
+	return m.Receiver + "." + m.Name
+}
+
+// fieldStrings renders fields as "name type" (Go) or "name: type" (TS/JS).
+func fieldStrings(fields []processor.Field, goLike bool) []string {
+	out := make([]string, 0, len(fields))
+	for _, f := range fields {
+		switch {
+		case f.Name == "":
+			out = append(out, f.Type)
+		case f.Type == "":
+			out = append(out, f.Name)
+		case goLike:
+			out = append(out, f.Name+" "+f.Type)
+		default:
+			out = append(out, f.Name+": "+f.Type)
+		}
+	}
+	return out
+}
+
+func renderStruct(r *processor.Result, s processor.Struct, cg *callgraph.CallGraph, includeInlineCalls bool) string {
+	goLike := isGoLike(r)
+	head := func(fields []string) string {
+		if goLike {
+			if len(fields) > 0 {
+				return fmt.Sprintf("type %s struct { %s }", s.Name, strings.Join(fields, "; "))
+			}
+			return fmt.Sprintf("type %s struct", s.Name)
+		}
+		if len(fields) > 0 {
+			return fmt.Sprintf("class %s { %s }", s.Name, strings.Join(fields, "; "))
+		}
+		return fmt.Sprintf("class %s", s.Name)
+	}
+
+	var b strings.Builder
 	if len(s.Fields) > 0 || len(s.Methods) > 0 {
+		b.WriteString(fmt.Sprintf("- `%s`%s\n", head(fieldStrings(s.Fields, goLike)), locSuffix(s.Loc)))
 		writeDoc(&b, s.Doc, "  ")
 	}
 	for _, m := range s.Methods {
-		b.WriteString(fmt.Sprintf("  - `func (%s) %s%s`%s\n", m.Receiver, m.Name, stripFuncKeyword(m.Signature), locSuffix(m.Loc)))
+		if goLike {
+			b.WriteString(fmt.Sprintf("  - `func (%s) %s%s`%s\n", m.Receiver, m.Name, stripFuncKeyword(m.Signature), locSuffix(m.Loc)))
+		} else {
+			b.WriteString(fmt.Sprintf("  - `%s%s`%s\n", m.Name, m.Signature, locSuffix(m.Loc)))
+		}
 		writeDoc(&b, m.Doc, "    ")
 		if includeInlineCalls {
-			writeTypedCalls(&b, cg, r.Package+".("+m.Receiver+")."+m.Name, "    ")
+			writeTypedCalls(&b, cg, methodQualified(r, m), "    ")
 		}
 	}
 	return b.String()
 }
 
-func renderInterface(iface processor.Interface) string {
+func renderInterface(r *processor.Result, iface processor.Interface) string {
+	goLike := isGoLike(r)
 	var b strings.Builder
-	if len(iface.Methods) > 0 {
-		methStrs := make([]string, 0, len(iface.Methods))
-		for _, m := range iface.Methods {
-			if m.Name != "" {
-				methStrs = append(methStrs, m.Name+stripFuncKeyword(m.Signature))
-			} else {
-				methStrs = append(methStrs, m.Signature)
-			}
+
+	members := fieldStrings(iface.Fields, goLike)
+	for _, m := range iface.Methods {
+		if m.Name != "" {
+			members = append(members, m.Name+stripFuncKeyword(m.Signature))
+		} else {
+			members = append(members, m.Signature)
 		}
-		b.WriteString(fmt.Sprintf("- `type %s interface { %s }`%s\n", iface.Name, strings.Join(methStrs, "; "), locSuffix(iface.Loc)))
-	} else {
+	}
+
+	switch {
+	case !goLike && iface.Alias != "":
+		b.WriteString(fmt.Sprintf("- `type %s = %s`%s\n", iface.Name, iface.Alias, locSuffix(iface.Loc)))
+	case !goLike && len(members) > 0:
+		b.WriteString(fmt.Sprintf("- `interface %s { %s }`%s\n", iface.Name, strings.Join(members, "; "), locSuffix(iface.Loc)))
+	case !goLike:
+		b.WriteString(fmt.Sprintf("- `interface %s`%s\n", iface.Name, locSuffix(iface.Loc)))
+	case len(members) > 0:
+		b.WriteString(fmt.Sprintf("- `type %s interface { %s }`%s\n", iface.Name, strings.Join(members, "; "), locSuffix(iface.Loc)))
+	default:
 		b.WriteString(fmt.Sprintf("- `type %s interface`%s\n", iface.Name, locSuffix(iface.Loc)))
 	}
 	writeDoc(&b, iface.Doc, "  ")
 	return b.String()
 }
 
-func renderFunc(r *processor.Result, fn processor.Function, cg *goparser.CallGraph, includeInlineCalls bool) string {
+func renderFunc(r *processor.Result, fn processor.Function, cg *callgraph.CallGraph, includeInlineCalls bool) string {
 	var b strings.Builder
 	sig := fn.Signature
-	if strings.HasPrefix(sig, "func") {
-		sig = "func " + fn.Name + sig[4:]
+	if isGoLike(r) {
+		if strings.HasPrefix(sig, "func") {
+			sig = "func " + fn.Name + sig[4:]
+		} else {
+			sig = "func " + fn.Name + " " + sig
+		}
 	} else {
-		sig = "func " + fn.Name + " " + sig
+		sig = "function " + fn.Name + sig
 	}
 	b.WriteString(fmt.Sprintf("- `%s`%s\n", sig, locSuffix(fn.Loc)))
 	writeDoc(&b, fn.Doc, "  ")
 	if includeInlineCalls {
-		writeTypedCalls(&b, cg, r.Package+"."+fn.Name, "  ")
+		writeTypedCalls(&b, cg, funcQualified(r, fn.Name), "  ")
 	}
 	return b.String()
 }
 
-func callGraphSection(cg *goparser.CallGraph) string {
+func callGraphSection(cg *callgraph.CallGraph) string {
 	var b strings.Builder
 	b.WriteString("\n## Call Graph\n\n")
 
@@ -527,7 +590,7 @@ func callGraphSection(cg *goparser.CallGraph) string {
 	return b.String()
 }
 
-func metricsSection(cg *goparser.CallGraph) string {
+func metricsSection(cg *callgraph.CallGraph) string {
 	var b strings.Builder
 	b.WriteString("\n## Metrics\n\n")
 
@@ -536,7 +599,7 @@ func metricsSection(cg *goparser.CallGraph) string {
 		return b.String()
 	}
 
-	metrics := goparser.CalculateMetrics(cg)
+	metrics := callgraph.CalculateMetrics(cg)
 	if metrics.TotalFunctions == 0 {
 		b.WriteString("*No metrics available*\n")
 		return b.String()
@@ -574,7 +637,7 @@ func metricsSection(cg *goparser.CallGraph) string {
 
 // execFlowSection traces execution flow for a handful of entry points that
 // actually drive calls, so the section stays useful without dumping everything.
-func execFlowSection(cg *goparser.CallGraph) string {
+func execFlowSection(cg *callgraph.CallGraph) string {
 	if cg == nil {
 		return ""
 	}
@@ -594,7 +657,7 @@ func execFlowSection(cg *goparser.CallGraph) string {
 	return b.String()
 }
 
-func findLeafFunctions(cg *goparser.CallGraph) []string {
+func findLeafFunctions(cg *callgraph.CallGraph) []string {
 	var leaves []string
 	for funcName := range cg.Functions {
 		if len(cg.Functions[funcName].Callees) == 0 {
@@ -606,7 +669,7 @@ func findLeafFunctions(cg *goparser.CallGraph) []string {
 	return leaves
 }
 
-func showCrossFileDeps(b *strings.Builder, cg *goparser.CallGraph) {
+func showCrossFileDeps(b *strings.Builder, cg *callgraph.CallGraph) {
 	hasCrossFile := false
 
 	for callee := range cg.Functions {
@@ -663,13 +726,6 @@ func treeFromPaths(paths []string) string {
 		b.WriteString(prefix + p + "\n")
 	}
 	return b.String()
-}
-
-func isExported(name string) bool {
-	if len(name) == 0 {
-		return false
-	}
-	return name[0] >= 'A' && name[0] <= 'Z'
 }
 
 func deduplicateStrings(s []string) []string {

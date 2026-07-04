@@ -66,11 +66,11 @@ func ensureIndex(args []string) (*index.Index, error) {
 		return nil, err
 	}
 
-	files, err := scanner.Scan(root, includeTests)
+	files, err := scanner.Scan(root, scanner.Options{Extensions: scanExtensions(), IncludeTests: includeTests})
 	if err != nil {
 		return nil, fmt.Errorf("scan: %w", err)
 	}
-	key, err := index.ComputeKey(root, files)
+	key, err := index.ComputeKey(root, files, formatter.SchemaVersion)
 	if err != nil {
 		return nil, fmt.Errorf("compute cache key: %w", err)
 	}
@@ -197,16 +197,20 @@ func runPackage(cmd *cobra.Command, args []string) error {
 		fmt.Printf("%s\n", p.Doc)
 	}
 	for _, s := range p.Structs {
-		printSym(index.Symbol{Kind: "struct", Name: s.Name, Doc: s.Doc, Location: s.Location})
+		printSym(index.Symbol{Kind: "struct", Language: p.Language, Name: s.Name, Doc: s.Doc, Location: s.Location})
 		for _, m := range s.Methods {
-			printSym(index.Symbol{Kind: "method", Receiver: m.Receiver, Name: m.Name, Signature: m.Signature, Doc: m.Doc, Location: m.Location})
+			printSym(index.Symbol{Kind: "method", Language: p.Language, Receiver: m.Receiver, Name: m.Name, Signature: m.Signature, Doc: m.Doc, Location: m.Location})
 		}
 	}
 	for _, in := range p.Interfaces {
-		printSym(index.Symbol{Kind: "interface", Name: in.Name, Doc: in.Doc, Location: in.Location})
+		sig := ""
+		if in.Alias != "" {
+			sig = "= " + in.Alias
+		}
+		printSym(index.Symbol{Kind: "interface", Language: p.Language, Name: in.Name, Signature: sig, Doc: in.Doc, Location: in.Location})
 	}
 	for _, f := range p.Functions {
-		printSym(index.Symbol{Kind: "func", Name: f.Name, Signature: f.Signature, Doc: f.Doc, Location: f.Location})
+		printSym(index.Symbol{Kind: "func", Language: p.Language, Name: f.Name, Signature: f.Signature, Doc: f.Doc, Location: f.Location})
 	}
 	return nil
 }
@@ -215,9 +219,26 @@ func printSym(s index.Symbol) {
 	fmt.Printf("%s\t%s\n", s.Location, declString(s))
 }
 
-// declString renders a one-line declaration for a symbol, reconstructing the
-// "func Name(...)" form from the stored "func(...)" signature.
+// declString renders a one-line declaration for a symbol in its language's
+// syntax: for Go, reconstructing the "func Name(...)" form from the stored
+// "func(...)" signature; for TypeScript/JavaScript, class/interface/function
+// forms (with type aliases shown as "type Name = ...").
 func declString(s index.Symbol) string {
+	if s.Language != "" && s.Language != "go" {
+		switch s.Kind {
+		case "struct":
+			return "class " + s.Name
+		case "interface":
+			if strings.HasPrefix(s.Signature, "= ") {
+				return "type " + s.Name + " " + s.Signature
+			}
+			return "interface " + s.Name
+		case "method":
+			return s.Receiver + "." + s.Name + s.Signature
+		default:
+			return "function " + s.Name + s.Signature
+		}
+	}
 	switch s.Kind {
 	case "struct":
 		return "type " + s.Name + " struct"

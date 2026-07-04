@@ -4,17 +4,17 @@ import (
 	"strings"
 	"testing"
 
-	goparser "github.com/jomolungmah/witc/internal/processor/go"
+	"github.com/jomolungmah/witc/internal/callgraph"
 )
 
 // makeGraph builds a CallGraph from a caller -> callees adjacency map, wiring
 // both the forward (Callees) and reverse (Callers) edges.
-func makeGraph(edges map[string][]string) *goparser.CallGraph {
-	cg := &goparser.CallGraph{Functions: map[string]*goparser.FuncInfo{}}
-	get := func(name string) *goparser.FuncInfo {
+func makeGraph(edges map[string][]string) *callgraph.CallGraph {
+	cg := &callgraph.CallGraph{Functions: map[string]*callgraph.FuncInfo{}}
+	get := func(name string) *callgraph.FuncInfo {
 		fi := cg.Functions[name]
 		if fi == nil {
-			fi = &goparser.FuncInfo{Name: name, Package: "pkg"}
+			fi = &callgraph.FuncInfo{Name: name, Package: "pkg"}
 			cg.Functions[name] = fi
 		}
 		return fi
@@ -23,8 +23,8 @@ func makeGraph(edges map[string][]string) *goparser.CallGraph {
 		cf := get(caller)
 		for _, callee := range callees {
 			ef := get(callee)
-			cf.Callees = append(cf.Callees, goparser.Callee{Name: callee})
-			ef.Callers = append(ef.Callers, goparser.Caller{Name: caller})
+			cf.Callees = append(cf.Callees, callgraph.Callee{Name: callee})
+			ef.Callers = append(ef.Callers, callgraph.Caller{Name: caller})
 		}
 	}
 	return cg
@@ -108,26 +108,5 @@ func TestGenerateDependencyMap_None(t *testing.T) {
 	summary := GenerateDependencyMap(makeGraph(map[string][]string{"a": {"b"}}))
 	if !strings.Contains(summary, "No external package calls") {
 		t.Errorf("expected no-deps message, got: %q", summary)
-	}
-}
-
-func TestIsExported(t *testing.T) {
-	tests := []struct {
-		name     string
-		expected bool
-	}{
-		{"Main", true},
-		{"process", false},
-		{"Helper", true},
-		{"helper", false},
-		{"", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := isExported(tt.name); got != tt.expected {
-				t.Errorf("isExported(%q) = %v, want %v", tt.name, got, tt.expected)
-			}
-		})
 	}
 }

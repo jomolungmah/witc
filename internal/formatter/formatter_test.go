@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jomolungmah/witc/internal/callgraph"
 	"github.com/jomolungmah/witc/internal/processor"
-	goparser "github.com/jomolungmah/witc/internal/processor/go"
 )
 
 func TestMarkdown(t *testing.T) {
@@ -99,10 +99,10 @@ func TestMarkdown_ShowsOutgoingCalls(t *testing.T) {
 			},
 		},
 		// Inline calls are sourced from the type-checked graph by qualified name.
-		CallGraph: &goparser.CallGraph{
-			Functions: map[string]*goparser.FuncInfo{
-				"pkg.Caller": {Name: "pkg.Caller", Package: "pkg", Callees: []goparser.Callee{{Name: "pkg.callee"}}},
-				"pkg.callee": {Name: "pkg.callee", Package: "pkg", Callers: []goparser.Caller{{Name: "pkg.Caller"}}},
+		CallGraph: &callgraph.CallGraph{
+			Functions: map[string]*callgraph.FuncInfo{
+				"pkg.Caller": {Name: "pkg.Caller", Package: "pkg", Callees: []callgraph.Callee{{Name: "pkg.callee"}}},
+				"pkg.callee": {Name: "pkg.callee", Package: "pkg", Callers: []callgraph.Caller{{Name: "pkg.Caller"}}},
 			},
 		},
 	}
@@ -135,8 +135,8 @@ func bigSummary(nFuncs int) *Summary {
 		Root:     "/tmp/example",
 		Paths:    []string{"pkg/a.go"},
 		Packages: map[string]*processor.Result{"pkg": {Package: "pkg", Functions: fns}},
-		CallGraph: &goparser.CallGraph{
-			Functions: map[string]*goparser.FuncInfo{},
+		CallGraph: &callgraph.CallGraph{
+			Functions: map[string]*callgraph.FuncInfo{},
 		},
 	}
 }
@@ -203,7 +203,7 @@ func TestMarkdown_SelectivityAndCollapse(t *testing.T) {
 		Packages: map[string]*processor.Result{
 			"pkg": {Package: "pkg", Functions: []processor.Function{
 				{Name: "helperOne", Signature: "func()"},
-				{Name: "Exported", Signature: "func()"},
+				{Name: "Exported", Exported: true, Signature: "func()"},
 				{Name: "helperTwo", Signature: "func()"},
 			}},
 		},
@@ -237,9 +237,9 @@ func TestMarkdown_ArchitectureSection(t *testing.T) {
 			"cmd/app":      {Package: "main", Doc: "Command app does things.", Functions: []processor.Function{{Name: "main", Signature: "func()"}}},
 			"internal/svc": {Package: "svc", Structs: []processor.Struct{{Name: "S"}}},
 		},
-		CallGraph: &goparser.CallGraph{Functions: map[string]*goparser.FuncInfo{
-			"main.main": {Name: "main.main", Package: "example.com/m/cmd/app", Callees: []goparser.Callee{{Name: "svc.Do"}}},
-			"svc.Do":    {Name: "svc.Do", Package: "example.com/m/internal/svc", Callers: []goparser.Caller{{Name: "main.main"}}},
+		CallGraph: &callgraph.CallGraph{Functions: map[string]*callgraph.FuncInfo{
+			"main.main": {Name: "main.main", Package: "example.com/m/cmd/app", Callees: []callgraph.Callee{{Name: "svc.Do"}}},
+			"svc.Do":    {Name: "svc.Do", Package: "example.com/m/internal/svc", Callers: []callgraph.Caller{{Name: "main.main"}}},
 		}},
 	}
 
@@ -277,11 +277,11 @@ func TestJSON_Schema(t *testing.T) {
 			},
 			"internal/svc": {Package: "svc", Structs: []processor.Struct{{Name: "S", Doc: "S serves."}}},
 		},
-		CallGraph: &goparser.CallGraph{
+		CallGraph: &callgraph.CallGraph{
 			ExternalCalls: 3,
-			Functions: map[string]*goparser.FuncInfo{
-				"main.main": {Name: "main.main", Package: "example.com/m/cmd/app", Callees: []goparser.Callee{{Name: "svc.Do"}}},
-				"svc.Do":    {Name: "svc.Do", Package: "example.com/m/internal/svc", Callers: []goparser.Caller{{Name: "main.main"}}},
+			Functions: map[string]*callgraph.FuncInfo{
+				"main.main": {Name: "main.main", Package: "example.com/m/cmd/app", Callees: []callgraph.Callee{{Name: "svc.Do"}}},
+				"svc.Do":    {Name: "svc.Do", Package: "example.com/m/internal/svc", Callers: []callgraph.Caller{{Name: "main.main"}}},
 			},
 		},
 	}
@@ -382,5 +382,102 @@ func TestJSON_SymbolLocations(t *testing.T) {
 	}
 	if len(p.Structs) != 1 || p.Structs[0].Location != nil {
 		t.Errorf("struct with unknown location should omit it, got %+v", p.Structs)
+	}
+}
+
+func TestMarkdown_TypeScriptRendering(t *testing.T) {
+	sum := &Summary{
+		Root:        "/tmp/app",
+		NoStructure: true,
+		Packages: map[string]*processor.Result{
+			"src/components": {
+				Package:  "components",
+				Language: "typescript",
+				Interfaces: []processor.Interface{
+					{Name: "UserCardProps", Exported: true, Doc: "Props for the card.", Fields: []processor.Field{
+						{Name: "name", Type: "string"},
+						{Name: "age?", Type: "number"},
+					}},
+					{Name: "ID", Exported: true, Alias: "string | number"},
+				},
+				Structs: []processor.Struct{
+					{Name: "Store", Exported: true, Fields: []processor.Field{{Name: "items", Type: "ID[]"}}, Methods: []processor.Method{
+						{Receiver: "Store", Name: "add", Exported: true, Signature: "(item: ID): void"},
+					}},
+				},
+				Functions: []processor.Function{
+					{Name: "UserCard", Exported: true, Signature: "(props: UserCardProps)"},
+				},
+			},
+		},
+	}
+
+	out, err := Markdown(sum)
+	if err != nil {
+		t.Fatalf("Markdown: %v", err)
+	}
+	for _, want := range []string{
+		"`interface UserCardProps { name: string; age?: number }`",
+		"`type ID = string | number`",
+		"`class Store { items: ID[] }`",
+		"  - `add(item: ID): void`",
+		"`function UserCard(props: UserCardProps)`",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("markdown missing %q\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "func UserCard") || strings.Contains(out, "type Store struct") {
+		t.Error("TypeScript package should not render with Go keywords")
+	}
+}
+
+func TestJSON_InterfaceFieldsAndAlias(t *testing.T) {
+	sum := &Summary{
+		Root: "/tmp/app",
+		Packages: map[string]*processor.Result{
+			"src": {
+				Package:  "src",
+				Language: "typescript",
+				Interfaces: []processor.Interface{
+					{Name: "Props", Exported: true, Fields: []processor.Field{{Name: "id", Type: "string"}}},
+					{Name: "ID", Exported: true, Alias: "string | number"},
+				},
+			},
+		},
+	}
+
+	out, err := JSON(sum)
+	if err != nil {
+		t.Fatalf("JSON: %v", err)
+	}
+	var got struct {
+		Packages []struct {
+			Language   string `json:"language"`
+			Interfaces []struct {
+				Name   string `json:"name"`
+				Alias  string `json:"alias"`
+				Fields []struct {
+					Name string `json:"name"`
+					Type string `json:"type"`
+				} `json:"fields"`
+			} `json:"interfaces"`
+		} `json:"packages"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	ifaces := got.Packages[0].Interfaces
+	if got.Packages[0].Language != "typescript" {
+		t.Errorf("language = %q", got.Packages[0].Language)
+	}
+	if len(ifaces) != 2 {
+		t.Fatalf("interfaces = %+v", ifaces)
+	}
+	if len(ifaces[0].Fields) != 1 || ifaces[0].Fields[0].Name != "id" || ifaces[0].Fields[0].Type != "string" {
+		t.Errorf("Props fields = %+v", ifaces[0].Fields)
+	}
+	if ifaces[1].Alias != "string | number" {
+		t.Errorf("ID alias = %q", ifaces[1].Alias)
 	}
 }

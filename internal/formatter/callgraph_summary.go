@@ -5,13 +5,13 @@ import (
 	"strconv"
 	"strings"
 
-	goparser "github.com/jomolungmah/witc/internal/processor/go"
+	"github.com/jomolungmah/witc/internal/callgraph"
 )
 
 // GenerateCallSummary creates a natural-language summary of the call graph,
 // reading the type-checked graph so names, packages, and counts match the
 // "Call Graph" and "Metrics" sections.
-func GenerateCallSummary(cg *goparser.CallGraph) string {
+func GenerateCallSummary(cg *callgraph.CallGraph) string {
 	var b strings.Builder
 	b.WriteString("### Call Flow Summary\n\n")
 
@@ -71,7 +71,7 @@ func GenerateCallSummary(cg *goparser.CallGraph) string {
 }
 
 // describeFunction renders one sentence about a function's outgoing calls.
-func describeFunction(name string, info *goparser.FuncInfo) string {
+func describeFunction(name string, info *callgraph.FuncInfo) string {
 	callees := uniqueCalleeNames(info)
 	var b strings.Builder
 	b.WriteString("- `" + name + "` ")
@@ -92,7 +92,7 @@ func describeFunction(name string, info *goparser.FuncInfo) string {
 
 // GenerateCallFlow describes the execution flow for a specific entry point by
 // walking the call graph depth-first with cycle detection.
-func GenerateCallFlow(entryPoint string, cg *goparser.CallGraph) string {
+func GenerateCallFlow(entryPoint string, cg *callgraph.CallGraph) string {
 	var b strings.Builder
 	b.WriteString("### Execution Flow: `" + entryPoint + "`\n\n")
 	if cg == nil {
@@ -103,7 +103,7 @@ func GenerateCallFlow(entryPoint string, cg *goparser.CallGraph) string {
 	return b.String()
 }
 
-func traverseCallFlow(name string, cg *goparser.CallGraph, b *strings.Builder, visited map[string]bool, depth int) {
+func traverseCallFlow(name string, cg *callgraph.CallGraph, b *strings.Builder, visited map[string]bool, depth int) {
 	indent := strings.Repeat("  ", depth)
 
 	if visited[name] {
@@ -130,7 +130,7 @@ func traverseCallFlow(name string, cg *goparser.CallGraph, b *strings.Builder, v
 
 // GenerateDependencyMap lists the external packages each analyzed package calls
 // into, derived from the type-checked external-call edges.
-func GenerateDependencyMap(cg *goparser.CallGraph) string {
+func GenerateDependencyMap(cg *callgraph.CallGraph) string {
 	var b strings.Builder
 	b.WriteString("### Package Dependencies\n\n")
 	if cg == nil || len(cg.ExternalDeps) == 0 {
@@ -159,7 +159,7 @@ func GenerateDependencyMap(cg *goparser.CallGraph) string {
 }
 
 // entryPointNames returns functions nothing in the module calls, plus main.
-func entryPointNames(cg *goparser.CallGraph) []string {
+func entryPointNames(cg *callgraph.CallGraph) []string {
 	var eps []string
 	for name, info := range cg.Functions {
 		if info == nil {
@@ -174,7 +174,7 @@ func entryPointNames(cg *goparser.CallGraph) []string {
 	return eps
 }
 
-func sortedFuncNames(cg *goparser.CallGraph) []string {
+func sortedFuncNames(cg *callgraph.CallGraph) []string {
 	names := make([]string, 0, len(cg.Functions))
 	for n := range cg.Functions {
 		names = append(names, n)
@@ -184,7 +184,7 @@ func sortedFuncNames(cg *goparser.CallGraph) []string {
 }
 
 // uniqueCalleeNames returns a function's distinct callees in sorted order.
-func uniqueCalleeNames(info *goparser.FuncInfo) []string {
+func uniqueCalleeNames(info *callgraph.FuncInfo) []string {
 	seen := make(map[string]bool, len(info.Callees))
 	var names []string
 	for _, c := range info.Callees {
@@ -198,7 +198,7 @@ func uniqueCalleeNames(info *goparser.FuncInfo) []string {
 }
 
 // uniqueCallerNames returns a function's distinct callers in sorted order.
-func uniqueCallerNames(info *goparser.FuncInfo) []string {
+func uniqueCallerNames(info *callgraph.FuncInfo) []string {
 	seen := make(map[string]bool, len(info.Callers))
 	var names []string
 	for _, c := range info.Callers {

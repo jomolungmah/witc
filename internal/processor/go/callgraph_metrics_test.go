@@ -6,60 +6,6 @@ import (
 	"github.com/jomolungmah/witc/internal/processor"
 )
 
-func TestCalculateMetrics_Basic(t *testing.T) {
-	cg := &CallGraph{
-		Functions: map[string]*FuncInfo{
-			"main": {
-				Name:    "main",
-				Package: "pkg",
-				Callees: []Callee{{Name: "Process"}},
-				Callers: []Caller{},
-			},
-			"Process": {
-				Name:    "Process",
-				Package: "pkg",
-				Callees: []Callee{{Name: "helper"}},
-				Callers: []Caller{{Name: "main"}},
-			},
-			"helper": {
-				Name:    "helper",
-				Package: "pkg",
-				Callees: []Callee{},
-				Callers: []Caller{{Name: "Process"}},
-			},
-		},
-	}
-
-	metrics := CalculateMetrics(cg)
-
-	if metrics.TotalFunctions != 3 {
-		t.Errorf("TotalFunctions = %d, want 3", metrics.TotalFunctions)
-	}
-	if metrics.TotalCalls != 2 {
-		t.Errorf("TotalCalls = %d, want 2", metrics.TotalCalls)
-	}
-}
-
-func TestCalculateMetrics_EmptyCallGraph(t *testing.T) {
-	metrics := CalculateMetrics(nil)
-
-	if metrics.TotalFunctions != 0 {
-		t.Errorf("TotalFunctions = %d, want 0", metrics.TotalFunctions)
-	}
-}
-
-func TestCalculateMetrics_NullFunctions(t *testing.T) {
-	cg := &CallGraph{
-		Functions: nil,
-	}
-
-	metrics := CalculateMetrics(cg)
-
-	if metrics.TotalFunctions != 0 {
-		t.Errorf("TotalFunctions = %d, want 0", metrics.TotalFunctions)
-	}
-}
-
 func TestCalculateCouplingScore(t *testing.T) {
 	calls := []CallInfo{
 		{CalleeName: "fmt.Println"},

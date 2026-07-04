@@ -53,12 +53,13 @@ func (p *Processor) Process(ctx context.Context, path string, src []byte) (*proc
 	}
 
 	if p.ExcludeGenerated && ast.IsGenerated(f) {
-		return &processor.Result{Package: f.Name.Name}, nil
+		return &processor.Result{Package: f.Name.Name, Language: "go"}, nil
 	}
 
 	result := &processor.Result{
 		Package:    f.Name.Name,
 		ImportPath: filepath.Dir(path),
+		Language:   "go",
 		Doc:        docSynopsis(f.Doc),
 		Structs:    nil,
 		Interfaces: nil,
@@ -88,7 +89,7 @@ func (p *Processor) Process(ctx context.Context, path string, src []byte) (*proc
 				}
 				switch t := ts.Type.(type) {
 				case *ast.StructType:
-					s := processor.Struct{Name: ts.Name.Name, Doc: docSynopsis(typeDoc), Loc: locOf(fset, ts.Name.Pos())}
+					s := processor.Struct{Name: ts.Name.Name, Exported: ts.Name.IsExported(), Doc: docSynopsis(typeDoc), Loc: locOf(fset, ts.Name.Pos())}
 					for _, field := range t.Fields.List {
 						for _, name := range field.Names {
 							s.Fields = append(s.Fields, processor.Field{
@@ -104,13 +105,14 @@ func (p *Processor) Process(ctx context.Context, path string, src []byte) (*proc
 					}
 					result.Structs = append(result.Structs, s)
 				case *ast.InterfaceType:
-					iface := processor.Interface{Name: ts.Name.Name, Doc: docSynopsis(typeDoc), Loc: locOf(fset, ts.Name.Pos())}
+					iface := processor.Interface{Name: ts.Name.Name, Exported: ts.Name.IsExported(), Doc: docSynopsis(typeDoc), Loc: locOf(fset, ts.Name.Pos())}
 					for _, m := range t.Methods.List {
 						if len(m.Names) > 0 {
 							sig := formatExpr(fset, m.Type)
 							for _, name := range m.Names {
 								iface.Methods = append(iface.Methods, processor.Method{
 									Name:      name.Name,
+									Exported:  name.IsExported(),
 									Loc:       locOf(fset, name.Pos()),
 									Signature: sig,
 								})
@@ -131,7 +133,7 @@ func (p *Processor) Process(ctx context.Context, path string, src []byte) (*proc
 			fnDoc := docSynopsis(x.Doc)
 			if x.Recv != nil {
 				recv := formatRecv(fset, x.Recv)
-				m := processor.Method{Receiver: recv, Name: x.Name.Name, Doc: fnDoc, Loc: locOf(fset, x.Name.Pos()), Signature: sig}
+				m := processor.Method{Receiver: recv, Name: x.Name.Name, Exported: x.Name.IsExported(), Doc: fnDoc, Loc: locOf(fset, x.Name.Pos()), Signature: sig}
 				// Attach to struct if found
 				for i := range result.Structs {
 					if result.Structs[i].Name == baseType(recv) {
@@ -140,12 +142,14 @@ func (p *Processor) Process(ctx context.Context, path string, src []byte) (*proc
 					}
 				}
 				result.Structs = append(result.Structs, processor.Struct{
-					Name:    baseType(recv),
-					Methods: []processor.Method{m},
+					Name:     baseType(recv),
+					Exported: ast.IsExported(baseType(recv)),
+					Methods:  []processor.Method{m},
 				})
 			} else {
 				result.Functions = append(result.Functions, processor.Function{
 					Name:      x.Name.Name,
+					Exported:  x.Name.IsExported(),
 					Doc:       fnDoc,
 					Loc:       locOf(fset, x.Name.Pos()),
 					Signature: sig,

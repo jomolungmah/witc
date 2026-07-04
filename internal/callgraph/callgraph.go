@@ -1,7 +1,12 @@
-package goparser
+// Package callgraph defines the language-neutral call-graph model shared by
+// all language processors, plus the generic aggregation and metrics that
+// operate on it. Language packages (e.g. processor/go) build these graphs;
+// the formatter and query layers consume them without knowing the language.
+package callgraph
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/jomolungmah/witc/internal/processor"
 )
@@ -11,11 +16,11 @@ type CallGraph struct {
 	Functions map[string]*FuncInfo `json:"functions"`
 	Edges     []Edge               `json:"edges"`
 	// ExternalCalls counts resolved calls to functions outside the analyzed
-	// module (standard library and third-party). Only the type-checked builder
-	// populates this; the AST aggregate leaves it zero.
+	// module (standard library and third-party). Only a language's precise
+	// builder populates this; the AST aggregate leaves it zero.
 	ExternalCalls int `json:"externalCalls,omitempty"`
 	// ExternalDeps maps each analyzed package's import path to the sorted set
-	// of external packages it calls into. Populated by the typed builder only.
+	// of external packages it calls into. Populated by precise builders only.
 	ExternalDeps map[string][]string `json:"externalDeps,omitempty"`
 }
 
@@ -54,6 +59,8 @@ type Edge struct {
 }
 
 // Aggregate builds a cross-file call graph from multiple processor results.
+// It is the language-independent fallback: it only needs the per-file call
+// records a processor collects, not type information.
 func Aggregate(results []*processor.Result) *CallGraph {
 	cg := &CallGraph{
 		Functions: make(map[string]*FuncInfo),
@@ -132,18 +139,49 @@ func Aggregate(results []*processor.Result) *CallGraph {
 	return cg
 }
 
+// Merge combines per-language call graphs into one. Function nodes are keyed
+// by name, so languages with distinct naming schemes (e.g. "pkg.Fn" for Go)
+// coexist without collisions; external counts and dependency maps are unioned.
+func Merge(graphs ...*CallGraph) *CallGraph {
+	merged := &CallGraph{Functions: map[string]*FuncInfo{}, Edges: []Edge{}}
+	for _, g := range graphs {
+		if g == nil {
+			continue
+		}
+		for name, info := range g.Functions {
+			if existing, ok := merged.Functions[name]; ok {
+				for _, f := range info.Files {
+					existing.addFileIfNew(f)
+				}
+				existing.Callers = append(existing.Callers, info.Callers...)
+				existing.Callees = append(existing.Callees, info.Callees...)
+			} else {
+				merged.Functions[name] = info
+			}
+		}
+		merged.Edges = append(merged.Edges, g.Edges...)
+		merged.ExternalCalls += g.ExternalCalls
+		for pkg, deps := range g.ExternalDeps {
+			if merged.ExternalDeps == nil {
+				merged.ExternalDeps = map[string][]string{}
+			}
+			merged.ExternalDeps[pkg] = append(merged.ExternalDeps[pkg], deps...)
+		}
+	}
+	return merged
+}
+
 // addFileIfNew adds a file to the list if not already present.
 func (fi *FuncInfo) addFileIfNew(file string) {
-	if file == "" {
+	if file == "" || slices.Contains(fi.Files, file) {
 		return
-	}
-	for _, f := range fi.Files {
-		if f == file {
-			return
-		}
 	}
 	fi.Files = append(fi.Files, file)
 }
+
+// AddFile records a file for this function, skipping duplicates. It is the
+// exported form used by language builders in other packages.
+func (fi *FuncInfo) AddFile(file string) { fi.addFileIfNew(file) }
 
 // GetFunction returns function info by name, or nil if not found.
 func (cg *CallGraph) GetFunction(name string) *FuncInfo {

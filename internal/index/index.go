@@ -30,14 +30,16 @@ func Path(root string) string { return filepath.Join(root, Dir, indexName) }
 func metaPath(root string) string { return filepath.Join(root, Dir, metaName) }
 
 // ComputeKey derives a content key for the scanned files from each file's path,
-// size, and modification time. It changes whenever a file is added, removed,
-// edited, or resized, so it captures uncommitted changes that a git revision
-// would miss.
-func ComputeKey(root string, files []scanner.File) (string, error) {
+// size, and modification time, plus a caller-supplied salt (the JSON schema
+// version). It changes whenever a file is added, removed, edited, or resized —
+// capturing uncommitted changes a git revision would miss — and whenever the
+// schema changes, so an upgraded binary never serves an old-schema cache.
+func ComputeKey(root string, files []scanner.File, salt string) (string, error) {
 	sorted := append([]scanner.File(nil), files...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Path < sorted[j].Path })
 
 	h := sha256.New()
+	fmt.Fprintf(h, "salt:%s\n", salt)
 	for _, f := range sorted {
 		fi, err := os.Stat(filepath.Join(root, f.Path))
 		if err != nil {

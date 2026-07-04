@@ -12,6 +12,7 @@ type Processor interface {
 type Result struct {
 	Package    string
 	ImportPath string // e.g. "internal/server" for display
+	Language   string // language identifier set by the producing processor, e.g. "go"
 	Doc        string // first sentence of the package doc comment, if any
 	Structs    []Struct
 	Interfaces []Interface

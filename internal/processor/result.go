@@ -9,26 +9,36 @@ type Location struct {
 	Column int
 }
 
-// Struct represents a struct type.
+// Struct represents a struct type (or, for other languages, a class).
 type Struct struct {
-	Name    string
-	Doc     string // first sentence of the doc comment, if any
-	Loc     Location
-	Fields  []Field
-	Methods []Method
+	Name     string
+	Exported bool   // part of the public API (capitalized in Go, exported in TS/JS)
+	Doc      string // first sentence of the doc comment, if any
+	Loc      Location
+	Fields   []Field
+	Methods  []Method
 }
 
-// Interface represents an interface type.
+// Interface represents an interface type (or, for TypeScript, an interface,
+// object type alias, or enum).
 type Interface struct {
-	Name    string
-	Doc     string // first sentence of the doc comment, if any
-	Loc     Location
+	Name     string
+	Exported bool   // part of the public API (capitalized in Go, exported in TS/JS)
+	Doc      string // first sentence of the doc comment, if any
+	Loc      Location
+	// Fields holds non-method members: TS interface properties, object type
+	// alias properties, and enum members. Always empty for Go interfaces.
+	Fields  []Field
 	Methods []Method
+	// Alias holds the right-hand side of a non-object type alias
+	// (e.g. "string | number" for `type ID = string | number`). Empty otherwise.
+	Alias string
 }
 
 // Function represents a top-level function.
 type Function struct {
 	Name      string
+	Exported  bool   // part of the public API (capitalized in Go, exported in TS/JS)
 	Doc       string // first sentence of the doc comment, if any
 	Loc       Location
 	Signature string
@@ -38,6 +48,7 @@ type Function struct {
 type Method struct {
 	Receiver  string
 	Name      string
+	Exported  bool   // part of the public API (capitalized in Go, exported in TS/JS)
 	Doc       string // first sentence of the doc comment, if any
 	Loc       Location
 	Signature string

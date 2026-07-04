@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"golang.org/x/tools/go/packages"
+
+	"github.com/jomolungmah/witc/internal/callgraph"
 )
 
 // loadMode is the set of information BuildTypedCallGraph needs from go/packages:
@@ -55,13 +57,13 @@ func (o BuildOptions) logf(format string, args ...any) {
 //
 // It returns an error (so callers can fall back to the AST graph) when the
 // module cannot be loaded or type-checked.
-func BuildTypedCallGraph(dir string) (*CallGraph, error) {
+func BuildTypedCallGraph(dir string) (*callgraph.CallGraph, error) {
 	return BuildTypedCallGraphWithOptions(dir, BuildOptions{})
 }
 
 // BuildTypedCallGraphWithOptions is BuildTypedCallGraph with diagnostic
 // instrumentation controlled by opts.
-func BuildTypedCallGraphWithOptions(dir string, opts BuildOptions) (*CallGraph, error) {
+func BuildTypedCallGraphWithOptions(dir string, opts BuildOptions) (*callgraph.CallGraph, error) {
 	cfg := &packages.Config{Mode: loadMode, Dir: dir}
 	if opts.TracePackages && opts.Logf != nil {
 		// go/packages logs driver (go list) invocations and their timing here.
@@ -100,7 +102,7 @@ func BuildTypedCallGraphWithOptions(dir string, opts BuildOptions) (*CallGraph, 
 	}
 
 	b := &typedBuilder{
-		cg:       &CallGraph{Functions: map[string]*FuncInfo{}, Edges: []Edge{}},
+		cg:       &callgraph.CallGraph{Functions: map[string]*callgraph.FuncInfo{}, Edges: []callgraph.Edge{}},
 		inModule: inModule,
 		edges:    map[string]struct{}{},
 		extDeps:  map[string]map[string]bool{},
@@ -130,7 +132,7 @@ func BuildTypedCallGraphWithOptions(dir string, opts BuildOptions) (*CallGraph, 
 }
 
 type typedBuilder struct {
-	cg       *CallGraph
+	cg       *callgraph.CallGraph
 	inModule map[string]bool
 	edges    map[string]struct{}
 	// extDeps records, per analyzed package path, the set of external package
@@ -208,13 +210,13 @@ func (b *typedBuilder) walkFile(p *packages.Package, file *ast.File) {
 	}
 }
 
-func (b *typedBuilder) node(name, pkgPath, file string) *FuncInfo {
+func (b *typedBuilder) node(name, pkgPath, file string) *callgraph.FuncInfo {
 	fi := b.cg.Functions[name]
 	if fi == nil {
-		fi = &FuncInfo{Name: name, Package: pkgPath, Files: []string{}, Callers: []Caller{}, Callees: []Callee{}}
+		fi = &callgraph.FuncInfo{Name: name, Package: pkgPath, Files: []string{}, Callers: []callgraph.Caller{}, Callees: []callgraph.Callee{}}
 		b.cg.Functions[name] = fi
 	}
-	fi.addFileIfNew(file)
+	fi.AddFile(file)
 	return fi
 }
 
@@ -232,9 +234,9 @@ func (b *typedBuilder) addEdge(callerName, callerPkg string, callee *types.Func,
 	callerInfo := b.node(callerName, callerPkg, base)
 	calleeInfo := b.node(calleeName, calleePkg, base)
 
-	callerInfo.Callees = append(callerInfo.Callees, Callee{Name: calleeName, File: base, Line: pos.Line, ParentFunc: callerName})
-	calleeInfo.Callers = append(calleeInfo.Callers, Caller{Name: callerName, File: base, Line: pos.Line, ParentFunc: callerName})
-	b.cg.Edges = append(b.cg.Edges, Edge{Caller: callerName, Callee: calleeName, File: base, Line: pos.Line})
+	callerInfo.Callees = append(callerInfo.Callees, callgraph.Callee{Name: calleeName, File: base, Line: pos.Line, ParentFunc: callerName})
+	calleeInfo.Callers = append(calleeInfo.Callers, callgraph.Caller{Name: callerName, File: base, Line: pos.Line, ParentFunc: callerName})
+	b.cg.Edges = append(b.cg.Edges, callgraph.Edge{Caller: callerName, Callee: calleeName, File: base, Line: pos.Line})
 }
 
 // calleeFunc resolves the function or method a call expression invokes, or nil

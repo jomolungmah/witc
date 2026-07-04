@@ -22,6 +22,7 @@ type Index struct {
 // Package is one package's API surface.
 type Package struct {
 	ImportPath string      `json:"importPath"`
+	Language   string      `json:"language"`
 	Doc        string      `json:"doc"`
 	Structs    []Struct    `json:"structs"`
 	Interfaces []Interface `json:"interfaces"`
@@ -53,6 +54,8 @@ type Interface struct {
 	Doc      string    `json:"doc"`
 	Location *Location `json:"location"`
 	Methods  []Method  `json:"methods"`
+	// Alias is the right-hand side of a non-object type alias (TS only).
+	Alias string `json:"alias"`
 }
 
 type Method struct {
@@ -96,6 +99,7 @@ func Parse(data []byte) (*Index, error) {
 type Symbol struct {
 	Kind      string    `json:"kind"` // "func", "method", "struct", "interface"
 	Package   string    `json:"package"`
+	Language  string    `json:"language,omitempty"`
 	Receiver  string    `json:"receiver,omitempty"`
 	Name      string    `json:"name"`
 	Signature string    `json:"signature,omitempty"`
@@ -117,19 +121,19 @@ func (ix *Index) Find(query string) []Symbol {
 			continue
 		}
 		for _, s := range p.Structs {
-			collect(&exact, &fuzzy, name, Symbol{Kind: "struct", Package: p.ImportPath, Name: s.Name, Doc: s.Doc, Location: s.Location})
+			collect(&exact, &fuzzy, name, Symbol{Kind: "struct", Package: p.ImportPath, Language: p.Language, Name: s.Name, Doc: s.Doc, Location: s.Location})
 			for _, m := range s.Methods {
-				collect(&exact, &fuzzy, name, Symbol{Kind: "method", Package: p.ImportPath, Receiver: m.Receiver, Name: m.Name, Signature: m.Signature, Doc: m.Doc, Location: m.Location})
+				collect(&exact, &fuzzy, name, Symbol{Kind: "method", Package: p.ImportPath, Language: p.Language, Receiver: m.Receiver, Name: m.Name, Signature: m.Signature, Doc: m.Doc, Location: m.Location})
 			}
 		}
 		for _, in := range p.Interfaces {
-			collect(&exact, &fuzzy, name, Symbol{Kind: "interface", Package: p.ImportPath, Name: in.Name, Doc: in.Doc, Location: in.Location})
+			collect(&exact, &fuzzy, name, Symbol{Kind: "interface", Package: p.ImportPath, Language: p.Language, Name: in.Name, Signature: aliasSignature(in.Alias), Doc: in.Doc, Location: in.Location})
 			for _, m := range in.Methods {
-				collect(&exact, &fuzzy, name, Symbol{Kind: "method", Package: p.ImportPath, Receiver: in.Name, Name: m.Name, Signature: m.Signature, Doc: m.Doc, Location: m.Location})
+				collect(&exact, &fuzzy, name, Symbol{Kind: "method", Package: p.ImportPath, Language: p.Language, Receiver: in.Name, Name: m.Name, Signature: m.Signature, Doc: m.Doc, Location: m.Location})
 			}
 		}
 		for _, f := range p.Functions {
-			collect(&exact, &fuzzy, name, Symbol{Kind: "func", Package: p.ImportPath, Name: f.Name, Signature: f.Signature, Doc: f.Doc, Location: f.Location})
+			collect(&exact, &fuzzy, name, Symbol{Kind: "func", Package: p.ImportPath, Language: p.Language, Name: f.Name, Signature: f.Signature, Doc: f.Doc, Location: f.Location})
 		}
 	}
 
@@ -139,6 +143,15 @@ func (ix *Index) Find(query string) []Symbol {
 	}
 	sortSymbols(hits)
 	return hits
+}
+
+// aliasSignature renders a type alias's right-hand side as a signature-like
+// string ("= string | number"), so alias hits show what the alias stands for.
+func aliasSignature(alias string) string {
+	if alias == "" {
+		return ""
+	}
+	return "= " + alias
 }
 
 // collect appends sym to exact when its name equals the query, else to fuzzy

@@ -32,11 +32,17 @@ func NewFoo() *Foo { return nil }
 	if result.Package != "pkg" {
 		t.Errorf("Package = %q, want pkg", result.Package)
 	}
+	if result.Language != "go" {
+		t.Errorf("Language = %q, want go", result.Language)
+	}
 	if len(result.Structs) != 1 {
 		t.Fatalf("len(Structs) = %d, want 1", len(result.Structs))
 	}
 	if result.Structs[0].Name != "Foo" {
 		t.Errorf("Struct name = %q, want Foo", result.Structs[0].Name)
+	}
+	if !result.Structs[0].Exported {
+		t.Error("Foo should be marked exported")
 	}
 	if len(result.Structs[0].Methods) != 1 {
 		t.Errorf("len(Methods) = %d, want 1", len(result.Structs[0].Methods))
@@ -261,5 +267,30 @@ type X struct{}
 	}
 	if len(result.Structs) != 0 {
 		t.Errorf("len(Structs) = %d, want 0 (generated should be skipped)", len(result.Structs))
+	}
+}
+
+func TestProcessor_Process_ExportedFlag(t *testing.T) {
+	src := `
+package pkg
+
+type hidden struct{}
+
+func Public() {}
+func private() {}
+`
+	result, err := (&Processor{}).Process(context.Background(), "pkg/x.go", []byte(src))
+	if err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	if result.Structs[0].Exported {
+		t.Error("hidden should not be marked exported")
+	}
+	got := map[string]bool{}
+	for _, fn := range result.Functions {
+		got[fn.Name] = fn.Exported
+	}
+	if !got["Public"] || got["private"] {
+		t.Errorf("Exported flags wrong: %v", got)
 	}
 }

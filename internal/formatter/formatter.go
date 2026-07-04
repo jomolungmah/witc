@@ -1,8 +1,8 @@
 package formatter
 
 import (
+	"github.com/jomolungmah/witc/internal/callgraph"
 	"github.com/jomolungmah/witc/internal/processor"
-	goparser "github.com/jomolungmah/witc/internal/processor/go"
 )
 
 // Summary is the aggregated output to format.
@@ -10,7 +10,7 @@ type Summary struct {
 	Root        string
 	Paths       []string
 	Packages    map[string]*processor.Result
-	CallGraph   *goparser.CallGraph
+	CallGraph   *callgraph.CallGraph
 	NoStructure bool
 	// Detail selects how many output tiers to emit: "low" (package list +
 	// exported API), "medium" (+ call graph + metrics), or "high" (everything,

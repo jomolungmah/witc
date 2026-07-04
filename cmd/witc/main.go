@@ -6,10 +6,10 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/jomolungmah/witc/internal/callgraph"
 	"github.com/jomolungmah/witc/internal/formatter"
 	"github.com/jomolungmah/witc/internal/index"
 	"github.com/jomolungmah/witc/internal/processor"
-	goparser "github.com/jomolungmah/witc/internal/processor/go"
 	"github.com/jomolungmah/witc/internal/progress"
 	"github.com/jomolungmah/witc/internal/scanner"
 	"github.com/spf13/cobra"
@@ -118,7 +118,7 @@ type buildOptions struct {
 // buildSummary runs the full pipeline (parse API surface, then build the
 // call graph) over the pre-scanned files and returns the aggregated summary.
 func buildSummary(root string, files []scanner.File, o buildOptions) (*formatter.Summary, error) {
-	proc := goparser.Processor{ExcludeGenerated: o.excludeGenerated}
+	langs := languages(o)
 	sum := &formatter.Summary{
 		Root:        root,
 		Paths:       make([]string, 0, len(files)),
@@ -137,7 +137,8 @@ func buildSummary(root string, files []scanner.File, o buildOptions) (*formatter
 	ctx := context.Background()
 	for i, f := range files {
 		rep.Step("Parsing files", i+1, len(files))
-		if !proc.Supports(f.Ext) {
+		lang := langFor(langs, f.Ext)
+		if lang == nil {
 			continue
 		}
 		sum.Paths = append(sum.Paths, f.Path)
@@ -145,7 +146,7 @@ func buildSummary(root string, files []scanner.File, o buildOptions) (*formatter
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", f.Path, err)
 		}
-		result, err := proc.Process(ctx, f.Path, src)
+		result, err := lang.processor.Process(ctx, f.Path, src)
 		if err != nil {
 			return nil, fmt.Errorf("process %s: %w", f.Path, err)
 		}
@@ -158,32 +159,48 @@ func buildSummary(root string, files []scanner.File, o buildOptions) (*formatter
 		}
 	}
 
-	var results []*processor.Result
-	for _, r := range sum.Packages {
-		results = append(results, r)
-	}
-
-	// Prefer a type-checked call graph (resolves callees precisely and merges
-	// duplicate nodes); fall back to the AST-only aggregate if the module can't
-	// be loaded or type-checked. This phase type-checks the dependency tree and
-	// is usually the slowest, so show an indeterminate spinner while it runs.
+	// Per language: prefer its precise call-graph builder (Go's resolves callees
+	// via full type information and merges duplicate nodes); fall back to the
+	// AST-only aggregate over that language's results if it fails. This phase
+	// type-checks the dependency tree and is usually the slowest, so show an
+	// indeterminate spinner while it runs.
 	stop := rep.Spin("Building call graph (type-checking)")
-	buildOpts := goparser.BuildOptions{PerPackage: o.verbose, TracePackages: o.veryVerbose}
-	if o.verbose {
-		buildOpts.Logf = func(format string, args ...any) {
-			fmt.Fprintf(os.Stderr, "witc: "+format+"\n", args...)
+	var graphs []*callgraph.CallGraph
+	for _, lang := range langs {
+		results := resultsForLanguage(sum, lang.name)
+		if len(results) == 0 {
+			continue
 		}
+		var g *callgraph.CallGraph
+		if lang.buildCallGraph != nil {
+			var err error
+			if g, err = lang.buildCallGraph(root, o); err != nil {
+				fmt.Fprintf(os.Stderr, "witc: using AST call graph for %s (%v)\n", lang.name, err)
+				g = nil
+			}
+		}
+		if g == nil {
+			// Languages without a precise builder use the AST aggregate directly.
+			g = callgraph.Aggregate(results)
+		}
+		graphs = append(graphs, g)
 	}
-	typed, typedErr := goparser.BuildTypedCallGraphWithOptions(root, buildOpts)
 	stop()
-	if typedErr == nil {
-		sum.CallGraph = typed
-	} else {
-		fmt.Fprintf(os.Stderr, "witc: using AST call graph (%v)\n", typedErr)
-		sum.CallGraph = goparser.Aggregate(results)
-	}
+	sum.CallGraph = callgraph.Merge(graphs...)
 	rep.Done(fmt.Sprintf("Analyzed %d files in %d packages", len(sum.Paths), len(sum.Packages)))
 	return sum, nil
+}
+
+// resultsForLanguage returns the merged per-package results produced by the
+// named language's processor.
+func resultsForLanguage(sum *formatter.Summary, lang string) []*processor.Result {
+	var out []*processor.Result
+	for _, r := range sum.Packages {
+		if r != nil && r.Language == lang {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 func runIndex(cmd *cobra.Command, args []string) error {
@@ -194,11 +211,11 @@ func runIndex(cmd *cobra.Command, args []string) error {
 
 	// The cache key is cheap to compute (just stats the scanned files), so check
 	// freshness before the expensive type-checked build.
-	files, err := scanner.Scan(root, includeTests)
+	files, err := scanner.Scan(root, scanner.Options{Extensions: scanExtensions(), IncludeTests: includeTests})
 	if err != nil {
 		return fmt.Errorf("scan: %w", err)
 	}
-	key, err := index.ComputeKey(root, files)
+	key, err := index.ComputeKey(root, files, formatter.SchemaVersion)
 	if err != nil {
 		return fmt.Errorf("compute cache key: %w", err)
 	}
@@ -238,7 +255,7 @@ func runSummarize(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	files, err := scanner.Scan(root, includeTests)
+	files, err := scanner.Scan(root, scanner.Options{Extensions: scanExtensions(), IncludeTests: includeTests})
 	if err != nil {
 		return fmt.Errorf("scan: %w", err)
 	}
@@ -281,6 +298,9 @@ func mergeResults(dst, src *processor.Result) {
 	// Preserve the package doc from whichever file carries it.
 	if dst.Doc == "" {
 		dst.Doc = src.Doc
+	}
+	if dst.Language == "" {
+		dst.Language = src.Language
 	}
 	// Merge structs by name (methods may be in different files)
 	for _, s := range src.Structs {

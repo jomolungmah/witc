@@ -3,6 +3,8 @@ package goparser
 import (
 	"strings"
 	"testing"
+
+	"github.com/jomolungmah/witc/internal/callgraph"
 )
 
 // TestBuildTypedCallGraph_ResolvesInternalEdges loads this package with full
@@ -105,7 +107,7 @@ func TestBuildTypedCallGraph_SilentByDefault(t *testing.T) {
 	}
 }
 
-func calleeNames(fi *FuncInfo) []string {
+func calleeNames(fi *callgraph.FuncInfo) []string {
 	var out []string
 	for _, c := range fi.Callees {
 		out = append(out, c.Name)
@@ -113,7 +115,7 @@ func calleeNames(fi *FuncInfo) []string {
 	return out
 }
 
-func callerNames(fi *FuncInfo) []string {
+func callerNames(fi *callgraph.FuncInfo) []string {
 	var out []string
 	for _, c := range fi.Callers {
 		out = append(out, c.Name)

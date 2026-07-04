@@ -5,7 +5,14 @@ versioned schema described here. The shape is deliberately decoupled from witc's
 internal types so they can be refactored without breaking consumers; any
 breaking change to this shape bumps `schemaVersion`.
 
-Current version: **`1.1`**
+Current version: **`1.2`**
+
+> **`1.2`** adds `language` to each package (`"go"` or `"typescript"`) and an
+> explicit `exported` boolean to each struct, interface, method, and function,
+> replacing the capitalization heuristic so non-Go languages can mark their
+> public API. Interfaces gain optional `fields` and `alias` for TypeScript
+> interfaces, object types, enums, and type aliases. The change is additive;
+> `1.1` consumers ignore the new fields.
 
 > **`1.1`** adds an optional `location` (`{ file, line }`) to each struct,
 > interface, method, and function, so consumers can jump straight to a symbol's
@@ -15,7 +22,7 @@ Current version: **`1.1`**
 
 | Field | Type | Notes |
 |-------|------|-------|
-| `schemaVersion` | string | Schema version, e.g. `"1.1"`. Check this before parsing. |
+| `schemaVersion` | string | Schema version, e.g. `"1.2"`. Check this before parsing. |
 | `root` | string | Absolute path of the analyzed directory. |
 | `packages` | array of [Package](#package) | Sorted by `importPath`. |
 | `callGraph` | [CallGraph](#callgraph) \| absent | Omitted when no call graph is available. |
@@ -30,17 +37,21 @@ the architecture maps) are module-relative directories, e.g. `internal/scanner`.
 | Field | Type | Notes |
 |-------|------|-------|
 | `importPath` | string | Module-relative package directory. |
+| `language` | string (optional) | Language identifier of the package's source: `"go"` or `"typescript"` (which also covers plain JavaScript). |
 | `doc` | string (optional) | First sentence of the package doc comment. |
-| `structs` | array of [Struct](#struct) (optional) | |
-| `interfaces` | array of [Interface](#interface) (optional) | |
+| `structs` | array of [Struct](#struct) (optional) | Go structs and TS/JS classes. |
+| `interfaces` | array of [Interface](#interface) (optional) | Go interfaces; TS interfaces, type aliases, and enums. |
 | `functions` | array of [Function](#function) (optional) | Package-level functions. |
 
-Test files (`_test.go`) are excluded unless `--include-tests` is passed.
+Test files (`_test.go`, `*.test.*`, `*.spec.*`, `__tests__/`) are excluded
+unless `--include-tests` is passed. Generated files (`.d.ts`, `.min.js`) and
+build output directories (`dist`, `.next`, `coverage`) are always excluded.
 
 ### Struct
 | Field | Type | Notes |
 |-------|------|-------|
 | `name` | string | |
+| `exported` | bool | Part of the public API (capitalized in Go, `export`ed in TS/JS). |
 | `doc` | string (optional) | First sentence of the doc comment. |
 | `location` | [Location](#location) (optional) | Declaration site. Omitted for a struct known only through its methods. |
 | `fields` | array of `{ name?, type }` (optional) | `name` omitted for embedded fields. |
@@ -50,15 +61,19 @@ Test files (`_test.go`) are excluded unless `--include-tests` is passed.
 | Field | Type | Notes |
 |-------|------|-------|
 | `name` | string | |
+| `exported` | bool | |
 | `doc` | string (optional) | |
 | `location` | [Location](#location) (optional) | Declaration site. |
+| `fields` | array of `{ name?, type }` (optional) | TS interface/object-type properties and enum members. Empty for Go. |
 | `methods` | array of [Method](#method) (optional) | |
+| `alias` | string (optional) | Right-hand side of a non-object TS type alias, e.g. `"string \| number"`. |
 
 ### Method
 | Field | Type | Notes |
 |-------|------|-------|
 | `receiver` | string (optional) | e.g. `*Processor`. Empty for interface methods. |
 | `name` | string | |
+| `exported` | bool | |
 | `doc` | string (optional) | |
 | `location` | [Location](#location) (optional) | Declaration site. |
 | `signature` | string | e.g. `func(ctx context.Context) error`. |
@@ -67,6 +82,7 @@ Test files (`_test.go`) are excluded unless `--include-tests` is passed.
 | Field | Type | Notes |
 |-------|------|-------|
 | `name` | string | |
+| `exported` | bool | |
 | `doc` | string (optional) | |
 | `location` | [Location](#location) (optional) | Declaration site. |
 | `signature` | string | |
@@ -123,14 +139,15 @@ Built with full type information; nodes are fully-qualified
 
 ```json
 {
-  "schemaVersion": "1.1",
+  "schemaVersion": "1.2",
   "root": "/path/to/project",
   "packages": [
     {
       "importPath": "internal/scanner",
+      "language": "go",
       "doc": "Package scanner discovers source files.",
       "functions": [
-        { "name": "Scan", "doc": "Scan walks the directory tree…", "location": { "file": "internal/scanner/scanner.go", "line": 28 }, "signature": "func(root string, includeTests bool) ([]File, error)" }
+        { "name": "Scan", "exported": true, "doc": "Scan walks the directory tree…", "location": { "file": "internal/scanner/scanner.go", "line": 59 }, "signature": "func(root string, opts Options) ([]File, error)" }
       ]
     }
   ],
