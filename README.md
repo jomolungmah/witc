@@ -31,13 +31,21 @@ Building requires a C compiler on the PATH (the TypeScript/JavaScript parsers
 use cgo). Make sure `$(go env GOPATH)/bin` (usually `~/go/bin`) is in your
 `$PATH` so the installed binary is accessible in your shell.
 
-Then copy the skill file to the agent folder of your choosing; here's an
-example for OpenCode:
+Then copy the skill file ([`SKILL.md`](SKILL.md), the canonical copy) to the
+agent folder of your choosing. For OpenCode:
 
 ```bash
 mkdir -p ~/.config/opencode/skills/witc && \
-  curl -sSL https://raw.githubusercontent.com/jomolungmah/witc/refs/heads/main/.opencode/skill/witc/SKILL.md \
+  curl -sSL https://raw.githubusercontent.com/jomolungmah/witc/refs/heads/main/SKILL.md \
     -o ~/.config/opencode/skills/witc/SKILL.md
+```
+
+For Claude Code:
+
+```bash
+mkdir -p ~/.claude/skills/witc && \
+  curl -sSL https://raw.githubusercontent.com/jomolungmah/witc/refs/heads/main/SKILL.md \
+    -o ~/.claude/skills/witc/SKILL.md
 ```
 
 ## Usage

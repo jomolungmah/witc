@@ -1,96 +1,93 @@
 ---
 name: witc
-description: Summarize a Go codebase (structure, API surface with docs, type-checked call graph, architecture, metrics) to get oriented before reading or editing, then query it for specific symbols without loading the whole summary. Use when you have little or no context about a Go project, or need to find where something lives. Supports a token budget so the summary fits your context window.
+description: Summarize and query a codebase's structure, API surface, and call graph — Go, TypeScript/JavaScript, and React, including monorepos that mix them. Use when starting work in an unfamiliar repo, when asked where a symbol is defined, who calls a function, what a function calls, or how a project is organized, and before grepping many files for a definition — `witc find` answers in tens of tokens instead of whole files.
 license: MIT
 ---
 
 # witc
 
-`witc` is a CLI that produces an LLM-friendly summary of a Go codebase: the file
-structure, the API surface (structs, interfaces, functions) **with the first
-sentence of each doc comment**, a **type-checked call graph**, a package-level
-architecture overview, and metrics.
+`witc` maps a codebase for you: file structure, the API surface (types,
+interfaces, functions, with the first sentence of each doc comment), a
+resolved call graph, package-level architecture, and metrics. It understands
+Go and TypeScript/JavaScript (React `.tsx`/`.jsx` included) and handles
+monorepos with both (e.g. `backend/` Go + `frontend/` React) in one run.
 
-## When to use
+## Which command to use
 
-- You're starting work in an unfamiliar Go repo and need orientation fast.
-- You need to find which package/function is responsible for something.
-- You want a compact, structured map of a project to load into context.
+| Situation | Run |
+|-----------|-----|
+| First contact with an unfamiliar repo | `witc summarize . --detail medium --max-tokens 4000` |
+| "Where is X defined?" / about to grep for a definition | `witc find X` (or `witc where X` for just file:line) |
+| "What breaks if I change X?" / "who uses X?" | `witc callers X` |
+| "What does X depend on / do?" | `witc callees X` |
+| Deep-dive into one package or directory | `witc package <dir>` |
 
-Prefer running `witc` once up front over reading many files blindly.
+Queries cost ~10–300 tokens; a full summary of a mid-size repo is tens of
+thousands. Once oriented, never re-run `summarize` to find one thing.
 
-## How to use
+## Targeted queries
 
-Run it via the shell. The only command is `summarize`:
-
-```
-witc summarize [path] [flags]
-```
-
-- `path` is optional and defaults to the current directory. It may be a
-  subdirectory of the module to summarize just that subtree.
-
-### Flags
-
-| Flag | Values | Default | What it does |
-|------|--------|---------|--------------|
-| `--output`, `-o` | file path | stdout | Write the summary to a file instead of stdout |
-| `--format` | `markdown`, `json` | `markdown` | Output format. `json` follows a versioned schema |
-| `--detail` | `low`, `medium`, `high` | `high` | How much to emit: `low` = exported API surface only; `medium` = + call graph, metrics, architecture; `high` = everything (inline calls, prose, execution flow) |
-| `--max-tokens` | integer | `0` | Cap estimated output size in tokens (`0` = unlimited). Least-important sections are dropped first and low-centrality symbols are truncated so it fits a context window |
-| `--no-structure` | (bool) | off | Omit the file-tree section |
-| `--include-tests` | (bool) | off | Include `_test.go` files (excluded by default) |
-| `--exclude-generated` | (bool) | off | Skip Go files marked as generated |
-| `--no-progress` | (bool) | off | Disable the progress bar/spinner printed to stderr (auto-disabled when stderr isn't a terminal) |
-| `--verbose`, `-v` | (count) | off | Increase verbosity (repeatable). `-v` logs call-graph build phase timings and per-package counts to stderr; `-vv` also traces `go/packages` driver (`go list`) invocations and their timing |
-
-### Common invocations
+Run via the shell from anywhere in the project (or pass the root as a second
+argument, e.g. `witc find Scan ~/work/lms`). The first query builds a cached
+index automatically and refreshes it when the source changes, so only the
+first call is slow.
 
 ```bash
-witc summarize .                          # full summary of the current project
-witc summarize . --detail low             # smallest: exported API + docs only
-witc summarize . --detail medium          # + call graph, metrics, architecture
-witc summarize . --max-tokens 4000        # bound the output to ~4000 tokens
-witc summarize ./internal/server          # summarize one subdirectory
-witc summarize . --format json -o out.json  # structured output to a file
-witc summarize . --include-tests          # also cover _test.go files
-```
-
-Tip: when you only need to know what a project is and where things live, start
-with `--detail medium` (or `--detail low --max-tokens N` for a strict budget).
-
-## Targeted lookups (cheaper than a full summary)
-
-Once oriented, **do not re-run `summarize` to find one thing.** Use the query
-commands: they read a cached index and print only the matching slice, so you
-spend a few tokens instead of re-loading the whole summary. They auto-build the
-index on first use and refresh it when the source changes.
-
-```bash
-witc find Scan            # symbol(s): file:line, signature, first-sentence doc
-witc where Markdown       # just the file:line — jump straight there
-witc callers ComputeKey   # who calls this function (in-module)
-witc callees runIndex     # what this function calls
+witc find Scan            # declaration + doc + location
+witc where ComputeKey     # location only
+witc callers ComputeKey   # in-module callers
+witc callees runIndex     # in-module callees
 witc package scanner      # one package's API surface
 ```
 
+Output is one `file:line<TAB>declaration` per match, e.g.:
+
+```
+internal/scanner/scanner.go:70	func Scan(root string, opts Options) ([]File, error)
+	Scan walks the directory tree and returns source files matching the extensions in opts.
+```
+
+```
+index.ComputeKey called by:
+  main.ensureIndex
+  main.runIndex
+```
+
 Names match exactly, as `pkg.Name`, or as a case-insensitive substring; all
-matches are listed when ambiguous. Add `--json` for structured output. Reach for
-`find`/`where` whenever you would otherwise grep for a definition.
+matches are listed when ambiguous. Methods match by bare name (`get` finds
+`spaceApi.get`) or qualified (`ApiClient.getUser`). Add `--json` for
+structured output.
 
-## Reading the output (markdown)
+**On a miss** ("no symbol matching", non-zero exit): try a shorter substring
+or the bare method name before falling back to grep. `callers` on a symbol
+that exists but is never called reports "no function matching … in the call
+graph" — that usually means it's an entry point or only used dynamically,
+which is itself the answer.
 
-The sections, in order, are: **Architecture** (entry points + which packages
-depend on which), **Packages** (the API surface with docs), **Call Graph**
-(who calls whom, entry points, leaf functions), **Metrics**, and natural-language
-**Call Flow / Execution Flow** traces.
+## Full summary
 
-Start with **Architecture** to see the shape of the project and entry points,
-then drill into the relevant package in **Packages**, and use the **Call Graph**
-to trace how a function connects to the rest of the code.
+```bash
+witc summarize .                          # everything (largest)
+witc summarize . --detail medium          # API + call graph + architecture
+witc summarize . --detail low             # exported API surface only
+witc summarize . --max-tokens 4000        # hard token budget, keeps the most central symbols
+witc summarize ./internal/server          # just one subtree
+witc summarize . --format json -o out.json
+witc summarize . --include-tests          # test files are excluded by default
+```
+
+Read it top-down: **Architecture** (entry points, package dependency lines)
+tells you the shape; **Packages** holds the API surface with docs; **Call
+Graph** shows who calls whom, entry points, and leaf functions.
 
 ## Notes
 
-- Go projects only.
-- The call graph is type-resolved (built from the compiled packages), so names
-  are fully qualified, e.g. `pkg.Func` or `pkg.(*Type).Method`.
+- Call-graph precision: Go is fully type-checked. TS/JS is type-checked too
+  when `node` and the project's `node_modules/typescript` are available
+  (calls through typed variables resolve); otherwise import resolution
+  (relative paths, barrel re-exports, tsconfig `baseUrl`/`paths`) still
+  connects cross-file calls, `new`, and JSX renders.
+- Node names are `pkg.Func` / `pkg.Type.method`, where `pkg` is the package
+  (Go) or directory base name (TS/JS).
+- `witc index` pre-builds the query cache (stored in `.witc/`); useful before
+  a batch of queries, otherwise unnecessary.
