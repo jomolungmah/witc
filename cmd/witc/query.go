@@ -236,6 +236,9 @@ func declString(s index.Symbol) string {
 		case "method":
 			return s.Receiver + "." + s.Name + s.Signature
 		default:
+			if s.Signature == "" { // factory-result const (store, wrapped component)
+				return "const " + s.Name
+			}
 			return "function " + s.Name + s.Signature
 		}
 	}

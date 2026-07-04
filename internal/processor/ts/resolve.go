@@ -11,17 +11,27 @@ import (
 
 // resolver maps import specifiers to module files. It resolves relative
 // specifiers against the importing file's directory and bare specifiers
-// against tsconfig baseUrl/paths aliases; anything that doesn't land on a
-// scanned module file is an external package.
+// against the nearest tsconfig's baseUrl/paths aliases, so monorepos with a
+// tsconfig.json inside a frontend/ subdirectory resolve the same as a
+// single-app repo; anything that doesn't land on a scanned module file is an
+// external package.
 type resolver struct {
 	// files is the set of scanned module files, slash-separated and relative
 	// to the module root. Resolution is answered from this set, not the disk,
 	// so skipped files (tests, dist, .d.ts) can't become call-graph targets.
 	files map[string]bool
-	// baseURL is tsconfig compilerOptions.baseUrl relative to the root ("" if unset).
-	baseURL string
-	// paths are tsconfig compilerOptions.paths aliases, e.g. "@/*" -> ["src/*"],
-	// with targets already joined onto baseUrl.
+	// configs maps a directory (relative, "." for root) to its parsed
+	// tsconfig.json; nil marks a directory checked and found without one.
+	configs map[string]*pathsConfig
+}
+
+// pathsConfig is the resolution-relevant part of one tsconfig.json, with all
+// targets already joined onto the tsconfig's own directory.
+type pathsConfig struct {
+	// base is the directory bare specifiers resolve against; empty when the
+	// tsconfig does not set baseUrl explicitly.
+	base string
+	// paths maps alias patterns ("@/*") to root-relative target patterns.
 	paths map[string][]string
 }
 
@@ -29,11 +39,24 @@ type resolver struct {
 var sourceExts = []string{".ts", ".tsx", ".js", ".jsx"}
 
 func newResolver(root string, relFiles []string) *resolver {
-	r := &resolver{files: make(map[string]bool, len(relFiles))}
-	for _, f := range relFiles {
-		r.files[filepath.ToSlash(f)] = true
+	r := &resolver{
+		files:   make(map[string]bool, len(relFiles)),
+		configs: map[string]*pathsConfig{},
 	}
-	r.loadTSConfig(filepath.Join(root, "tsconfig.json"))
+	for _, f := range relFiles {
+		f = filepath.ToSlash(f)
+		r.files[f] = true
+		// Load the tsconfig.json (if any) of every ancestor directory once, so
+		// nearestConfig can answer from the map alone.
+		for dir := path.Dir(f); ; dir = path.Dir(dir) {
+			if _, seen := r.configs[dir]; !seen {
+				r.configs[dir] = loadTSConfig(root, dir)
+			}
+			if dir == "." {
+				break
+			}
+		}
+	}
 	return r
 }
 
@@ -45,36 +68,47 @@ type tsconfig struct {
 	} `json:"compilerOptions"`
 }
 
-func (r *resolver) loadTSConfig(configPath string) {
-	data, err := os.ReadFile(configPath)
+// loadTSConfig parses root/dir/tsconfig.json into a pathsConfig with targets
+// joined onto dir, or nil when the file is missing or unusable.
+func loadTSConfig(root, dir string) *pathsConfig {
+	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(dir), "tsconfig.json"))
 	if err != nil {
-		return
+		return nil
 	}
 	var cfg tsconfig
 	// tsconfig.json is JSONC; a config that still fails after stripping
 	// comments and trailing commas just disables alias resolution.
 	if err := json.Unmarshal(stripJSONC(data), &cfg); err != nil {
-		return
+		return nil
 	}
-	r.baseURL = path.Clean(filepath.ToSlash(cfg.CompilerOptions.BaseURL))
-	if r.baseURL == "." || r.baseURL == "/" {
-		r.baseURL = ""
+
+	pc := &pathsConfig{}
+	if raw := cfg.CompilerOptions.BaseURL; raw != "" {
+		pc.base = path.Join(dir, filepath.ToSlash(raw))
 	}
-	r.baseURL = strings.TrimPrefix(r.baseURL, "./")
+	// Without an explicit baseUrl, paths targets are relative to the tsconfig.
+	targetBase := pc.base
+	if targetBase == "" {
+		targetBase = dir
+	}
 	for pattern, targets := range cfg.CompilerOptions.Paths {
 		joined := make([]string, 0, len(targets))
 		for _, t := range targets {
-			joined = append(joined, path.Join(r.baseURL, filepath.ToSlash(t)))
+			joined = append(joined, path.Join(targetBase, filepath.ToSlash(t)))
 		}
-		if r.paths == nil {
-			r.paths = map[string][]string{}
+		if pc.paths == nil {
+			pc.paths = map[string][]string{}
 		}
-		r.paths[pattern] = joined
+		pc.paths[pattern] = joined
 	}
+	if pc.base == "" && pc.paths == nil {
+		return nil // nothing resolution-relevant in this config
+	}
+	return pc
 }
 
 // jsoncTrailingComma removes commas dangling before a closing brace/bracket.
-// It runs after comment stripping, on the rare chance a string value contains
+// It runs after comment stripping; on the rare chance a string value contains
 // ",}" it would corrupt it, but tsconfig resolution fields never do.
 var jsoncTrailingComma = regexp.MustCompile(`,(\s*[}\]])`)
 
@@ -120,6 +154,19 @@ func stripJSONC(data []byte) []byte {
 	return jsoncTrailingComma.ReplaceAll(out, []byte("$1"))
 }
 
+// nearestConfig returns the closest tsconfig at or above dir, or nil.
+func (r *resolver) nearestConfig(dir string) *pathsConfig {
+	for {
+		if cfg := r.configs[dir]; cfg != nil {
+			return cfg
+		}
+		if dir == "." {
+			return nil
+		}
+		dir = path.Dir(dir)
+	}
+}
+
 // resolve maps an import specifier in fromDir to a module file. It returns
 // the matched file ("" when the import is external) and, for external
 // imports, the package name ("react", "@scope/pkg").
@@ -130,19 +177,21 @@ func (r *resolver) resolve(fromDir, spec string) (file, pkg string) {
 		}
 		return "", "" // relative miss: points at an unscanned file, not a package
 	}
-	for pattern, targets := range r.paths {
-		if rest, ok := matchPattern(pattern, spec); ok {
-			for _, target := range targets {
-				if f := r.lookup(strings.Replace(target, "*", rest, 1)); f != "" {
-					return f, ""
+	if cfg := r.nearestConfig(fromDir); cfg != nil {
+		for pattern, targets := range cfg.paths {
+			if rest, ok := matchPattern(pattern, spec); ok {
+				for _, target := range targets {
+					if f := r.lookup(strings.Replace(target, "*", rest, 1)); f != "" {
+						return f, ""
+					}
 				}
 			}
 		}
-	}
-	if r.baseURL != "" || len(r.paths) > 0 {
-		// With a baseUrl, bare specifiers may name module files from the root.
-		if f := r.lookup(path.Join(r.baseURL, spec)); f != "" {
-			return f, ""
+		if cfg.base != "" {
+			// An explicit baseUrl lets bare specifiers name module files.
+			if f := r.lookup(path.Join(cfg.base, spec)); f != "" {
+				return f, ""
+			}
 		}
 	}
 	return "", packageName(spec)

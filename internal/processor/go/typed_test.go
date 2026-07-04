@@ -1,6 +1,8 @@
 package goparser
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -121,4 +123,56 @@ func callerNames(fi *callgraph.FuncInfo) []string {
 		out = append(out, c.Name)
 	}
 	return out
+}
+
+// TestBuildTypedCallGraphForModules_Monorepo verifies that a repo whose go.mod
+// lives in a subdirectory still gets a typed graph, with package paths
+// remapped to root-relative display paths.
+func TestBuildTypedCallGraphForModules_Monorepo(t *testing.T) {
+	root := t.TempDir()
+	write := func(rel, content string) {
+		t.Helper()
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("frontend/app.ts", "export {};\n") // non-Go content at the root
+	write("backend/go.mod", "module example.com/backend\n\ngo 1.21\n")
+	write("backend/internal/svc/svc.go", `package svc
+
+func Helper() int { return 1 }
+
+func Do() int { return Helper() }
+`)
+	write("backend/cmd/server/main.go", `package main
+
+import "example.com/backend/internal/svc"
+
+func main() { svc.Do() }
+`)
+
+	cg, err := BuildTypedCallGraphForModules(root, BuildOptions{})
+	if err != nil {
+		t.Fatalf("BuildTypedCallGraphForModules: %v", err)
+	}
+	do := cg.GetFunction("svc.Do")
+	if do == nil {
+		t.Fatalf("missing svc.Do; have %v", cg.GetAllFunctions())
+	}
+	if do.Package != "backend/internal/svc" {
+		t.Errorf("svc.Do package = %q, want backend/internal/svc (root-relative)", do.Package)
+	}
+	found := false
+	for _, c := range do.Callers {
+		if c.Name == "main.main" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("svc.Do should be called by main.main; callers: %v", callerNames(do))
+	}
 }

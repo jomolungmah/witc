@@ -147,7 +147,7 @@ func (f *file) declaration(result *processor.Result, n *sitter.Node, exported bo
 			result.Functions = append(result.Functions, fn)
 		}
 	case "lexical_declaration", "variable_declaration":
-		result.Functions = append(result.Functions, f.functionConsts(n, exported, docText)...)
+		f.constDecls(result, n, exported, docText)
 	}
 }
 
@@ -321,10 +321,11 @@ func (f *file) functionDecl(n *sitter.Node, exported bool, docText string) (proc
 	}, true
 }
 
-// functionConsts extracts `const f = () => ...` / `const f = function ...`
-// declarators as Functions. Non-function consts are not part of the model yet.
-func (f *file) functionConsts(n *sitter.Node, exported bool, docText string) []processor.Function {
-	var fns []processor.Function
+// constDecls extracts top-level const/let declarators: function values become
+// Functions, and object literals with function members (API clients, service
+// objects) become class-like Structs. Other const values are not part of the
+// model yet.
+func (f *file) constDecls(result *processor.Result, n *sitter.Node, exported bool, docText string) {
 	for i := uint(0); i < n.NamedChildCount(); i++ {
 		d := n.NamedChild(i)
 		if d.Kind() != "variable_declarator" {
@@ -332,18 +333,90 @@ func (f *file) functionConsts(n *sitter.Node, exported bool, docText string) []p
 		}
 		name := d.ChildByFieldName("name")
 		value := d.ChildByFieldName("value")
-		if name == nil || value == nil || name.Kind() != "identifier" || !isFunctionValue(value) {
+		if name == nil || value == nil || name.Kind() != "identifier" {
 			continue
 		}
-		fns = append(fns, processor.Function{
-			Name:      f.text(name),
-			Exported:  exported,
-			Doc:       docText,
-			Loc:       f.loc(name),
-			Signature: f.signature(value),
-		})
+		switch {
+		case isFunctionValue(value):
+			result.Functions = append(result.Functions, processor.Function{
+				Name:      f.text(name),
+				Exported:  exported,
+				Doc:       docText,
+				Loc:       f.loc(name),
+				Signature: f.signature(value),
+			})
+		case value.Kind() == "object":
+			if s, ok := f.objectConst(f.text(name), name, value, exported, docText); ok {
+				result.Structs = append(result.Structs, s)
+			}
+		case value.Kind() == "call_expression":
+			// A factory-result const (zustand's create(), React's memo(),
+			// createBrowserRouter(), ...) is API surface: stores and wrapped
+			// components are imported and called all over an app. The empty
+			// signature renders it as "const Name" rather than a function.
+			result.Functions = append(result.Functions, processor.Function{
+				Name:     f.text(name),
+				Exported: exported,
+				Doc:      docText,
+				Loc:      f.loc(name),
+			})
+		}
 	}
-	return fns
+}
+
+// objectConst maps `const api = { get(id) {...}, retries: 3 }` onto the Struct
+// model: function-valued members become methods, literal members become typed
+// fields. Objects with no function members are plain data, not API surface.
+func (f *file) objectConst(name string, nameNode, obj *sitter.Node, exported bool, docText string) (processor.Struct, bool) {
+	s := processor.Struct{Name: name, Exported: exported, Doc: docText, Loc: f.loc(nameNode)}
+	for i := uint(0); i < obj.NamedChildCount(); i++ {
+		member := obj.NamedChild(i)
+		switch member.Kind() {
+		case "pair":
+			key := member.ChildByFieldName("key")
+			value := member.ChildByFieldName("value")
+			if key == nil || value == nil {
+				continue
+			}
+			if isFunctionValue(value) {
+				s.Methods = append(s.Methods, processor.Method{
+					Receiver:  name,
+					Name:      f.text(key),
+					Exported:  exported,
+					Doc:       f.docFor(member),
+					Loc:       f.loc(key),
+					Signature: f.signature(value),
+				})
+			} else if t := literalType(value); t != "" {
+				s.Fields = append(s.Fields, processor.Field{Name: f.text(key), Type: t})
+			}
+		case "method_definition": // shorthand `get(id) {...}`
+			if key := member.ChildByFieldName("name"); key != nil {
+				s.Methods = append(s.Methods, processor.Method{
+					Receiver:  name,
+					Name:      f.text(key),
+					Exported:  exported,
+					Doc:       f.docFor(member),
+					Loc:       f.loc(key),
+					Signature: f.signature(member),
+				})
+			}
+		}
+	}
+	return s, len(s.Methods) > 0
+}
+
+// literalType names the primitive type of a literal member value, or "".
+func literalType(n *sitter.Node) string {
+	switch n.Kind() {
+	case "string", "template_string":
+		return "string"
+	case "number":
+		return "number"
+	case "true", "false":
+		return "boolean"
+	}
+	return ""
 }
 
 func isFunctionValue(n *sitter.Node) bool {
@@ -414,7 +487,8 @@ func (f *file) docFor(n *sitter.Node) string {
 }
 
 // stripCommentMarkers removes // and /** */ decoration and JSDoc tag lines,
-// leaving plain prose for the synopsis.
+// leaving plain prose for the synopsis. Banner decoration such as
+// "===== Section =====" is trimmed to its text.
 func stripCommentMarkers(raw string) string {
 	raw = strings.TrimPrefix(raw, "/**")
 	raw = strings.TrimPrefix(raw, "/*")
@@ -424,6 +498,7 @@ func stripCommentMarkers(raw string) string {
 		line = strings.TrimSpace(line)
 		line = strings.TrimSpace(strings.TrimPrefix(line, "//"))
 		line = strings.TrimSpace(strings.TrimPrefix(line, "*"))
+		line = strings.TrimSpace(strings.Trim(line, "=-*#~"))
 		if strings.HasPrefix(line, "@") { // JSDoc tags end the prose
 			break
 		}

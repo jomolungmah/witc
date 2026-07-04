@@ -61,7 +61,7 @@ func goLanguage(o buildOptions) language {
 					fmt.Fprintf(os.Stderr, "witc: "+format+"\n", args...)
 				}
 			}
-			return goparser.BuildTypedCallGraphWithOptions(root, buildOpts)
+			return goparser.BuildTypedCallGraphForModules(root, buildOpts)
 		},
 	}
 }

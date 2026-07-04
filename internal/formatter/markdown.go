@@ -517,13 +517,14 @@ func renderInterface(r *processor.Result, iface processor.Interface) string {
 func renderFunc(r *processor.Result, fn processor.Function, cg *callgraph.CallGraph, includeInlineCalls bool) string {
 	var b strings.Builder
 	sig := fn.Signature
-	if isGoLike(r) {
-		if strings.HasPrefix(sig, "func") {
-			sig = "func " + fn.Name + sig[4:]
-		} else {
-			sig = "func " + fn.Name + " " + sig
-		}
-	} else {
+	switch {
+	case isGoLike(r) && strings.HasPrefix(sig, "func"):
+		sig = "func " + fn.Name + sig[4:]
+	case isGoLike(r):
+		sig = "func " + fn.Name + " " + sig
+	case sig == "": // factory-result const (store, wrapped component)
+		sig = "const " + fn.Name
+	default:
 		sig = "function " + fn.Name + sig
 	}
 	b.WriteString(fmt.Sprintf("- `%s`%s\n", sig, locSuffix(fn.Loc)))

@@ -82,8 +82,14 @@ type moduleFile struct {
 }
 
 type decl struct {
+	// isClass marks declarations with member methods: classes, and object
+	// consts with function-valued members (API clients, service objects).
 	isClass bool
-	methods map[string]bool // for classes, including "constructor"
+	methods map[string]bool // member methods; for classes includes "constructor"
+	// lazy declarations (consts holding non-function values, e.g. zustand
+	// stores) are valid call targets but are not pre-registered as nodes, so
+	// plain data constants don't show up as functions.
+	lazy bool
 }
 
 type importRef struct {
@@ -136,6 +142,7 @@ func (m *module) load(relPath string) error {
 	}
 	// Register every declared function and method as a node up front, so
 	// uncalled functions still appear in the graph (like Go's typed builder).
+	// Lazy declarations become nodes only if something references them.
 	for name, d := range f.decls {
 		if d.isClass {
 			for meth := range d.methods {
@@ -143,7 +150,9 @@ func (m *module) load(relPath string) error {
 			}
 			continue
 		}
-		m.node(f.nodeName(name), f.dir).AddFile(f.path)
+		if !d.lazy {
+			m.node(f.nodeName(name), f.dir).AddFile(f.path)
+		}
 	}
 	return nil
 }
@@ -298,14 +307,54 @@ func (f *moduleFile) declare(n *sitter.Node) string {
 			}
 			name := dcl.ChildByFieldName("name")
 			value := dcl.ChildByFieldName("value")
-			if name != nil && value != nil && name.Kind() == "identifier" && isFunctionValue(value) {
-				f.decls[f.text(name)] = &decl{}
-				last = f.text(name)
+			if name == nil || value == nil || name.Kind() != "identifier" {
+				continue
 			}
+			switch {
+			case isFunctionValue(value):
+				f.decls[f.text(name)] = &decl{}
+			case value.Kind() == "object":
+				// An object const with function members acts like a class.
+				if methods := f.objectMethodNames(value); len(methods) > 0 {
+					f.decls[f.text(name)] = &decl{isClass: true, methods: methods}
+				} else {
+					f.decls[f.text(name)] = &decl{lazy: true}
+				}
+			default:
+				// Stores, factories, plain values: a call target, not a node.
+				f.decls[f.text(name)] = &decl{lazy: true}
+			}
+			last = f.text(name)
 		}
 		return last
 	}
 	return ""
+}
+
+// objectMethodNames collects the names of an object literal's function-valued
+// members, both `get: (id) => ...` pairs and shorthand `get(id) {...}`.
+func (f *moduleFile) objectMethodNames(obj *sitter.Node) map[string]bool {
+	var methods map[string]bool
+	for i := uint(0); i < obj.NamedChildCount(); i++ {
+		member := obj.NamedChild(i)
+		var key *sitter.Node
+		switch member.Kind() {
+		case "pair":
+			if v := member.ChildByFieldName("value"); v == nil || !isFunctionValue(v) {
+				continue
+			}
+			key = member.ChildByFieldName("key")
+		case "method_definition":
+			key = member.ChildByFieldName("name")
+		}
+		if key != nil {
+			if methods == nil {
+				methods = map[string]bool{}
+			}
+			methods[f.text(key)] = true
+		}
+	}
+	return methods
 }
 
 // resolveExport finds the node name behind an exported name of a file,
@@ -359,9 +408,21 @@ func (m *module) connect(f *moduleFile, n *sitter.Node, parent, class string) {
 		}
 	case "variable_declarator":
 		name := n.ChildByFieldName("name")
-		if value := n.ChildByFieldName("value"); name != nil && value != nil &&
-			name.Kind() == "identifier" && isFunctionValue(value) {
-			parent = f.nodeName(f.text(name))
+		if value := n.ChildByFieldName("value"); name != nil && value != nil && name.Kind() == "identifier" {
+			switch {
+			case isFunctionValue(value):
+				parent = f.nodeName(f.text(name))
+			case value.Kind() == "object" && f.decls[f.text(name)] != nil:
+				// Top-level object const: its function members are attributed
+				// like methods ("api.spaceApi.get"), via the pair case below.
+				class = f.text(name)
+			}
+		}
+	case "pair":
+		if key := n.ChildByFieldName("key"); key != nil && class != "" {
+			if v := n.ChildByFieldName("value"); v != nil && isFunctionValue(v) {
+				parent = f.nodeName(class + "." + f.text(key))
+			}
 		}
 	case "call_expression":
 		if fn := n.ChildByFieldName("function"); fn != nil {

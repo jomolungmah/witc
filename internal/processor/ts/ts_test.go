@@ -321,3 +321,64 @@ func TestSupports(t *testing.T) {
 		t.Error("Supports should reject non-TS/JS extensions")
 	}
 }
+
+func TestProcess_ObjectConstAsAPI(t *testing.T) {
+	src := `/** Space API client. */
+export const spaceApi = {
+  baseUrl: "/api/spaces",
+  /** Fetches one space. */
+  get: (id: string) => fetch("/api/spaces/" + id),
+  async create(name: string) { return fetch("/api/spaces"); },
+};
+
+export const config = { retries: 3, verbose: true };
+`
+	r := process(t, "api.ts", src)
+	if len(r.Structs) != 1 {
+		t.Fatalf("Structs = %+v, want just spaceApi (config has no methods)", r.Structs)
+	}
+	s := r.Structs[0]
+	if s.Name != "spaceApi" || !s.Exported || s.Doc != "Space API client." {
+		t.Errorf("spaceApi = %+v", s)
+	}
+	if len(s.Fields) != 1 || s.Fields[0] != (processor.Field{Name: "baseUrl", Type: "string"}) {
+		t.Errorf("Fields = %+v", s.Fields)
+	}
+	if len(s.Methods) != 2 {
+		t.Fatalf("Methods = %+v", s.Methods)
+	}
+	get := s.Methods[0]
+	if get.Name != "get" || get.Receiver != "spaceApi" || get.Signature != "(id: string)" {
+		t.Errorf("get = %+v", get)
+	}
+	if get.Doc != "Fetches one space." {
+		t.Errorf("get doc = %q", get.Doc)
+	}
+	if create := s.Methods[1]; create.Name != "create" || create.Signature != "(name: string)" {
+		t.Errorf("create = %+v", create)
+	}
+}
+
+func TestProcess_FactoryConsts(t *testing.T) {
+	src := `import { create } from "zustand";
+
+/** Global space state. */
+export const useSpaceStore = create(() => ({ active: null }));
+const queryClient = newishFactory();
+export const MAX_SPACES = 10;
+export const NAMES = ["a", "b"];
+`
+	r := process(t, "store.ts", src)
+	store := findFunction(t, r, "useSpaceStore")
+	if !store.Exported || store.Signature != "" || store.Doc != "Global space state." {
+		t.Errorf("useSpaceStore = %+v, want exported, empty signature", store)
+	}
+	if qc := findFunction(t, r, "queryClient"); qc.Exported {
+		t.Errorf("queryClient should be unexported, got %+v", qc)
+	}
+	for _, fn := range r.Functions {
+		if fn.Name == "MAX_SPACES" || fn.Name == "NAMES" {
+			t.Errorf("literal const %s should not be API surface", fn.Name)
+		}
+	}
+}

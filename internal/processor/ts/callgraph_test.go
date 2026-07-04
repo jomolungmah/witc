@@ -239,3 +239,96 @@ func TestBuildCallGraph_NodesAndExternals(t *testing.T) {
 		t.Errorf("util.double package = %q, want src/util", pkg)
 	}
 }
+
+func TestResolver_NearestTSConfig(t *testing.T) {
+	root := t.TempDir()
+	// Monorepo shape: the tsconfig lives in frontend/, not at the root, and
+	// aliases @/* to frontend/src/*.
+	writeTSFile(t, root, "frontend/tsconfig.json", `{
+  "compilerOptions": { "baseUrl": ".", "paths": { "@/*": ["./src/*"] } }
+}`)
+	files := []string{
+		"frontend/src/lib/api.ts",
+		"frontend/src/pages/Home.tsx",
+	}
+	r := newResolver(root, files)
+
+	if f, _ := r.resolve("frontend/src/pages", "@/lib/api"); f != "frontend/src/lib/api.ts" {
+		t.Errorf("alias via nested tsconfig = %q, want frontend/src/lib/api.ts", f)
+	}
+	if f, _ := r.resolve("frontend/src/pages", "src/lib/api"); f != "frontend/src/lib/api.ts" {
+		t.Errorf("baseUrl via nested tsconfig = %q, want frontend/src/lib/api.ts", f)
+	}
+	if _, pkg := r.resolve("frontend/src/pages", "react"); pkg != "react" {
+		t.Errorf("bare specifier should stay external, got pkg %q", pkg)
+	}
+}
+
+func TestBuildCallGraph_AliasFromNestedTSConfig(t *testing.T) {
+	root := t.TempDir()
+	writeTSFile(t, root, "frontend/tsconfig.json", `{"compilerOptions":{"baseUrl":".","paths":{"@/*":["./src/*"]}}}`)
+	writeTSFile(t, root, "frontend/src/lib/api.ts", `
+export function getUser(id: string) { return id; }
+`)
+	writeTSFile(t, root, "frontend/src/pages/Home.tsx", `
+import { getUser } from "@/lib/api";
+export function Home() { return <div>{getUser("1")}</div>; }
+`)
+	cg, err := BuildCallGraph(root, []string{"frontend/src/lib/api.ts", "frontend/src/pages/Home.tsx"})
+	if err != nil {
+		t.Fatalf("BuildCallGraph: %v", err)
+	}
+	home := cg.GetFunction("pages.Home")
+	if home == nil || !calleeNames(home)["lib.getUser"] {
+		t.Errorf("Home should call lib.getUser via @/ alias; got %+v", home)
+	}
+}
+
+func TestBuildCallGraph_ObjectConstsAndStores(t *testing.T) {
+	root := t.TempDir()
+	writeTSFile(t, root, "src/lib/api.ts", `
+export const spaceApi = {
+  get: (id: string) => fetch("/s/" + id),
+  create(name: string) { return spaceApi.get(name); },
+};
+`)
+	writeTSFile(t, root, "src/lib/store.ts", `
+import { create } from "zustand";
+export const useSpaceStore = create(() => ({ active: null }));
+export const MAX_SPACES = 10;
+`)
+	writeTSFile(t, root, "src/Provider.tsx", `
+import { spaceApi } from "./lib/api";
+import { useSpaceStore, MAX_SPACES } from "./lib/store";
+
+export function Provider() {
+  const s = useSpaceStore();
+  spaceApi.get("1");
+  return <div>{s}</div>;
+}
+`)
+	cg, err := BuildCallGraph(root, []string{"src/lib/api.ts", "src/lib/store.ts", "src/Provider.tsx"})
+	if err != nil {
+		t.Fatalf("BuildCallGraph: %v", err)
+	}
+
+	provider := cg.GetFunction("src.Provider")
+	callees := calleeNames(provider)
+	if !callees["lib.spaceApi.get"] {
+		t.Errorf("Provider should call lib.spaceApi.get (object const member); callees = %v", callees)
+	}
+	if !callees["lib.useSpaceStore"] {
+		t.Errorf("Provider should call lib.useSpaceStore (store const); callees = %v", callees)
+	}
+
+	// Object members are attributed as callers of what their bodies call.
+	create := cg.GetFunction("lib.spaceApi.create")
+	if create == nil || !calleeNames(create)["lib.spaceApi.get"] {
+		t.Errorf("spaceApi.create should call spaceApi.get; got %+v", create)
+	}
+
+	// A never-referenced value const must not become a node.
+	if cg.GetFunction("lib.MAX_SPACES") != nil {
+		t.Error("MAX_SPACES should not be a call-graph node")
+	}
+}

@@ -5,11 +5,16 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"io/fs"
+	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
+	"golang.org/x/mod/modfile"
 	"golang.org/x/tools/go/packages"
 
 	"github.com/jomolungmah/witc/internal/callgraph"
@@ -59,6 +64,112 @@ func (o BuildOptions) logf(format string, args ...any) {
 // module cannot be loaded or type-checked.
 func BuildTypedCallGraph(dir string) (*callgraph.CallGraph, error) {
 	return BuildTypedCallGraphWithOptions(dir, BuildOptions{})
+}
+
+// moduleSkipDirs are not descended into when searching for go.mod files.
+var moduleSkipDirs = map[string]bool{
+	"vendor": true, "node_modules": true, ".git": true, "testdata": true,
+}
+
+// findModuleDirs returns the root-relative directories under root that contain
+// a go.mod file ("." for root itself), sorted shallowest-first.
+func findModuleDirs(root string) []string {
+	var dirs []string
+	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil // unreadable subtree: skip rather than abort discovery
+		}
+		if d.IsDir() {
+			if p != root && moduleSkipDirs[d.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.Name() == "go.mod" {
+			rel, err := filepath.Rel(root, filepath.Dir(p))
+			if err == nil {
+				dirs = append(dirs, filepath.ToSlash(rel))
+			}
+		}
+		return nil
+	})
+	sort.Strings(dirs)
+	return dirs
+}
+
+// BuildTypedCallGraphForModules builds the typed call graph for every Go
+// module found under root and merges them, so monorepos where go.mod lives in
+// a subdirectory (e.g. backend/) still get the type-checked tier. Nested
+// modules have their package paths remapped to root-relative display paths
+// ("backend/internal/svc") so they align with the summary's package keys; a
+// single module at the root keeps full import paths, preserving the original
+// single-module output. Modules that fail to load are skipped (logged via
+// opts.Logf); an error is returned only when no module builds.
+func BuildTypedCallGraphForModules(root string, opts BuildOptions) (*callgraph.CallGraph, error) {
+	dirs := findModuleDirs(root)
+	if len(dirs) == 0 || (len(dirs) == 1 && dirs[0] == ".") {
+		// No go.mod below root: root may itself be inside a module (witc run
+		// on a subdirectory), which go/packages resolves by searching upward.
+		return BuildTypedCallGraphWithOptions(root, opts)
+	}
+
+	var graphs []*callgraph.CallGraph
+	var firstErr error
+	for _, dir := range dirs {
+		g, err := BuildTypedCallGraphWithOptions(filepath.Join(root, filepath.FromSlash(dir)), opts)
+		if err != nil {
+			opts.logf("skipping module %s: %v", dir, err)
+			if firstErr == nil {
+				firstErr = fmt.Errorf("module %s: %w", dir, err)
+			}
+			continue
+		}
+		if dir != "." {
+			remapModulePackages(g, modulePathOf(root, dir), dir)
+		}
+		graphs = append(graphs, g)
+	}
+	if len(graphs) == 0 {
+		return nil, firstErr
+	}
+	return callgraph.Merge(graphs...), nil
+}
+
+// modulePathOf reads the module path from dir's go.mod ("" when unreadable).
+func modulePathOf(root, dir string) string {
+	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(dir), "go.mod"))
+	if err != nil {
+		return ""
+	}
+	return modfile.ModulePath(data)
+}
+
+// remapModulePackages rewrites a nested module's package paths from full
+// import paths to root-relative display paths, on both function nodes and the
+// external-dependency keys.
+func remapModulePackages(g *callgraph.CallGraph, modulePath, dir string) {
+	if modulePath == "" {
+		return
+	}
+	remap := func(pkg string) string {
+		if pkg == modulePath {
+			return dir
+		}
+		if rest, ok := strings.CutPrefix(pkg, modulePath+"/"); ok {
+			return path.Join(dir, rest)
+		}
+		return pkg
+	}
+	for _, fi := range g.Functions {
+		fi.Package = remap(fi.Package)
+	}
+	if len(g.ExternalDeps) > 0 {
+		deps := make(map[string][]string, len(g.ExternalDeps))
+		for pkg, list := range g.ExternalDeps {
+			deps[remap(pkg)] = list
+		}
+		g.ExternalDeps = deps
+	}
 }
 
 // BuildTypedCallGraphWithOptions is BuildTypedCallGraph with diagnostic
