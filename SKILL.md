@@ -74,6 +74,7 @@ witc summarize . --max-tokens 4000        # hard token budget, keeps the most ce
 witc summarize ./internal/server          # just one subtree
 witc summarize . --format json -o out.json
 witc summarize . --include-tests          # test files are excluded by default
+witc summarize . --exclude-generated      # skip generated Go files ("Code generated … DO NOT EDIT.")
 ```
 
 Read it top-down: **Architecture** (entry points, package dependency lines)
@@ -90,4 +91,5 @@ Graph** shows who calls whom, entry points, and leaf functions.
 - Node names are `pkg.Func` / `pkg.Type.method`, where `pkg` is the package
   (Go) or directory base name (TS/JS).
 - `witc index` pre-builds the query cache (stored in `.witc/`); useful before
-  a batch of queries, otherwise unnecessary.
+  a batch of queries, otherwise unnecessary. It also takes
+  `--exclude-generated` to keep generated Go files out of query results.
