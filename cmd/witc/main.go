@@ -49,7 +49,7 @@ func main() {
 	summarizeCmd.Flags().StringVarP(&outputFile, "output", "o", "", "Write output to file (default: stdout)")
 	summarizeCmd.Flags().StringVar(&format, "format", "markdown", "Output format: markdown, json")
 	summarizeCmd.Flags().BoolVar(&noStructure, "no-structure", false, "Omit file structure, output API surface only")
-	summarizeCmd.Flags().BoolVar(&excludeGen, "exclude-generated", false, "Skip generated Go files")
+	summarizeCmd.Flags().BoolVar(&excludeGen, "exclude-generated", true, "Skip generated Go files")
 	summarizeCmd.Flags().BoolVar(&includeTests, "include-tests", false, "Include _test.go files in the summary")
 	summarizeCmd.Flags().StringVar(&detail, "detail", "high", "Output detail: low (API only), medium (+call graph, metrics), high (everything)")
 	summarizeCmd.Flags().IntVar(&maxTokens, "max-tokens", 0, "Cap estimated output size in tokens (0 = unlimited)")
