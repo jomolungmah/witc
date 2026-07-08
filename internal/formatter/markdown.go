@@ -42,11 +42,13 @@ const (
 	detailHigh   = "high"
 )
 
-// section is one emitted block, tagged with a drop priority. Lower rank is more
-// important and dropped last; ranks 0 (header) and 1 (API surface) are core and
-// never dropped wholesale (the API surface is truncated instead).
+// section is one emitted block, tagged with a drop priority and a short name.
+// Lower rank is more important and dropped last; ranks 0 (header) and 1 (API
+// surface) are core and never dropped wholesale (the API surface is truncated
+// instead). The name identifies droppable sections in the omission manifest.
 type section struct {
 	rank    int
+	name    string
 	content string
 }
 
@@ -81,43 +83,110 @@ func Markdown(sum *Summary) (string, error) {
 
 	header := fmt.Sprintf("# witc summary: %s\n\n", sum.Root)
 
+	// Build the non-core sections first so the API budget can reserve room for
+	// the header and, worst case, a manifest naming every droppable section.
+	structure := structureSection(sum)
+	architecture := architectureSection(sum)
+	callGraph := callGraphSection(sum.CallGraph)
+	metrics := metricsSection(sum.CallGraph)
+	callSummary := GenerateCallSummary(sum.CallGraph)
+	depMap := GenerateDependencyMap(sum.CallGraph)
+	execFlow := execFlowSection(sum.CallGraph)
+
 	// The API surface is core; build it with whatever budget remains after the
-	// (tiny) header so it can truncate itself when it alone exceeds the budget.
-	apiBudget := 0
+	// header and manifest reserve, so it self-degrades via its own ladder rather
+	// than being blunt-clamped once those are added back to the output. A
+	// negative budget means unlimited; zero means "a real ceiling with no room to
+	// spare" — kept distinct so a tiny budget still degrades gracefully instead
+	// of being mistaken for unlimited and rendered in full.
+	apiBudget := -1
 	if sum.MaxTokens > 0 {
-		apiBudget = sum.MaxTokens - estimateTokens(header)
+		var droppable []string
+		for _, s := range []section{
+			{2, "structure", structure},
+			{2, "architecture", architecture},
+			{3, "call graph", callGraph},
+			{4, "metrics", metrics},
+			{5, "call summary", callSummary},
+			{6, "dependency map", depMap},
+			{7, "execution flow", execFlow},
+		} {
+			if s.rank <= maxRank && s.content != "" {
+				droppable = append(droppable, s.name)
+			}
+		}
+		reserve := estimateTokens(header) + estimateTokens(omittedSectionsNote(droppable))
+		apiBudget = sum.MaxTokens - reserve
 		if apiBudget < 0 {
 			apiBudget = 0
 		}
 	}
 
-	// Sections in output order; empty ones and those above maxRank are dropped.
-	candidates := []section{
-		{0, header},
-		{2, structureSection(sum)},
-		{2, architectureSection(sum)},
-		{1, apiSection(sum, includeInlineCalls, detail != detailHigh, apiBudget)},
-		{3, callGraphSection(sum.CallGraph)},
-		{4, metricsSection(sum.CallGraph)},
-		{5, GenerateCallSummary(sum.CallGraph)},
-		{6, GenerateDependencyMap(sum.CallGraph)},
-		{7, execFlowSection(sum.CallGraph)},
-	}
+	// assemble builds the full output for a given API budget. Because
+	// estimateTokens floors each piece, the sum-of-floors that apiSection and
+	// trimToBudget track can undercount the floor-of-the-whole by a few tokens.
+	// We therefore measure the assembled result and, on overflow, shrink the API
+	// budget by exactly that slack and rebuild — so graceful degradation absorbs
+	// the residue instead of the blunt clamp truncating a whole trailing line.
+	assemble := func(apiBudget int) (out string, total int) {
+		api := apiSection(sum, includeInlineCalls, detail != detailHigh, apiBudget)
 
-	var kept []section
-	for _, s := range candidates {
-		if s.rank <= maxRank && s.content != "" {
-			kept = append(kept, s)
+		// Sections in output order; empty ones and those above maxRank are dropped.
+		candidates := []section{
+			{0, "", header},
+			{2, "structure", structure},
+			{2, "architecture", architecture},
+			{1, "", api},
+			{3, "call graph", callGraph},
+			{4, "metrics", metrics},
+			{5, "call summary", callSummary},
+			{6, "dependency map", depMap},
+			{7, "execution flow", execFlow},
 		}
+
+		var kept []section
+		for _, s := range candidates {
+			if s.rank <= maxRank && s.content != "" {
+				kept = append(kept, s)
+			}
+		}
+
+		kept, dropped := trimToBudget(kept, sum.MaxTokens)
+
+		var b strings.Builder
+		for i, s := range kept {
+			b.WriteString(s.content)
+			// Surface dropped sections up top (after the header) so the manifest
+			// survives the tail-trimming clamp and the reader learns what's missing.
+			if i == 0 {
+				b.WriteString(omittedSectionsNote(dropped))
+			}
+		}
+		out = b.String()
+		return out, estimateTokens(out)
 	}
 
-	kept = trimToBudget(kept, sum.MaxTokens)
-
-	var b strings.Builder
-	for _, s := range kept {
-		b.WriteString(s.content)
+	out, total := assemble(apiBudget)
+	// Reconcile accumulation slack: if the measured total overruns the budget,
+	// give apiSection exactly that much less room and rebuild. Bounded by the
+	// number of pieces, so this settles in a pass or two.
+	for over := total - sum.MaxTokens; sum.MaxTokens > 0 && over > 0 && apiBudget > 0; over = total - sum.MaxTokens {
+		apiBudget -= over
+		if apiBudget < 0 {
+			apiBudget = 0
+		}
+		out, total = assemble(apiBudget)
 	}
-	return clampTokens(b.String(), sum.MaxTokens), nil
+	return clampTokens(out, sum.MaxTokens), nil
+}
+
+// omittedSectionsNote names the whole sections dropped to fit the budget, so a
+// silent omission becomes an actionable pointer. Empty when nothing was dropped.
+func omittedSectionsNote(names []string) string {
+	if len(names) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("_Sections omitted to fit the token budget: %s. Re-run with a higher --max-tokens to include them._\n\n", strings.Join(names, ", "))
 }
 
 // clampTokens is the final hard guarantee that output fits the budget. Section
@@ -141,18 +210,20 @@ func clampTokens(s string, maxTokens int) string {
 }
 
 // trimToBudget drops sections, highest rank first, until the estimated total
-// fits within maxTokens (0 = unlimited). Core sections (rank <= 1) are kept.
-func trimToBudget(secs []section, maxTokens int) []section {
+// fits within maxTokens (0 = unlimited). Core sections (rank <= 1) are kept. It
+// returns the dropped section names (in drop order) and counts the omission
+// manifest against the budget as it grows, so the note itself never overflows.
+func trimToBudget(secs []section, maxTokens int) (kept []section, dropped []string) {
 	if maxTokens <= 0 {
-		return secs
+		return secs, nil
 	}
 	for {
-		total := 0
+		total := estimateTokens(omittedSectionsNote(dropped))
 		for _, s := range secs {
 			total += estimateTokens(s.content)
 		}
 		if total <= maxTokens {
-			return secs
+			return secs, dropped
 		}
 		victim, maxRank := -1, 1
 		for i, s := range secs {
@@ -161,8 +232,9 @@ func trimToBudget(secs []section, maxTokens int) []section {
 			}
 		}
 		if victim == -1 {
-			return secs // only core remains; API was already budget-truncated
+			return secs, dropped // only core remains; API was already budget-truncated
 		}
+		dropped = append(dropped, secs[victim].name)
 		secs = append(secs[:victim], secs[victim+1:]...)
 	}
 }
@@ -295,10 +367,12 @@ func structureSection(sum *Summary) string {
 	return b.String()
 }
 
-// apiSection renders the package/symbol API surface. When budget > 0, symbols
-// are emitted in importance order (types, then exported and unexported
-// functions by call-graph centrality) and truncated once the budget is hit,
-// with a per-package note of how many were omitted.
+// apiSection renders the package/symbol API surface. When budget >= 0 (a
+// negative budget means unlimited), symbols are emitted in importance order
+// (types, then exported and unexported functions by call-graph centrality).
+// Once the budget is hit, a symbol whose
+// full form won't fit degrades to its declaration line before being dropped
+// entirely, with per-package notes of how many were degraded and omitted.
 func apiSection(sum *Summary, includeInlineCalls, collapseUnexported bool, budget int) string {
 	pkgNames := make([]string, 0, len(sum.Packages))
 	for k := range sum.Packages {
@@ -310,7 +384,14 @@ func apiSection(sum *Summary, includeInlineCalls, collapseUnexported bool, budge
 	b.WriteString("## Packages\n\n")
 	tokens := estimateTokens(b.String())
 
-	for _, pkg := range pkgNames {
+	// budget < 0 means unlimited; budget >= 0 is a hard token ceiling (0 = no room
+	// to spare, which still degrades gracefully rather than rendering in full).
+	// Reserve a little headroom so the closing omission notes (which are capped)
+	// always fit, keeping the surface within budget without the blunt tail clamp.
+	limited := budget >= 0
+	contentBudget := max(budget-noteReserve, 0)
+
+	for i, pkg := range pkgNames {
 		r := sum.Packages[pkg]
 		if r == nil {
 			continue
@@ -319,21 +400,57 @@ func apiSection(sum *Summary, includeInlineCalls, collapseUnexported bool, budge
 		if r.Doc != "" {
 			head += "_" + r.Doc + "_\n\n"
 		}
+		// No room for even this package's header; name the remaining packages so
+		// they stay discoverable, then stop. The note is sized to the budget left
+		// so it never overflows regardless of how long the package paths are.
+		if limited && tokens+estimateTokens(head) > contentBudget {
+			var rest []string
+			for _, p := range pkgNames[i:] {
+				if sum.Packages[p] != nil {
+					rest = append(rest, p)
+				}
+			}
+			b.WriteString(omittedPackagesNote(rest, budget-tokens))
+			break
+		}
 		b.WriteString(head)
 		tokens += estimateTokens(head)
 
-		omitted := 0
+		omitted, degraded := 0, 0
+		var omittedNames []string
 		for _, entry := range symbolEntries(r, sum.CallGraph, includeInlineCalls, collapseUnexported) {
-			et := estimateTokens(entry)
-			if budget > 0 && tokens+et > budget {
+			et := estimateTokens(entry.content)
+			if limited && tokens+et > contentBudget {
+				// Before dropping the symbol, try its declaration-only form so
+				// the reader still sees the signature and location.
+				if ct := estimateTokens(entry.compact); entry.compact != entry.content && tokens+ct <= contentBudget {
+					b.WriteString(entry.compact)
+					tokens += ct
+					degraded++
+					continue
+				}
 				omitted++
+				if entry.name != "" {
+					omittedNames = append(omittedNames, entry.name)
+				}
 				continue
 			}
-			b.WriteString(entry)
+			b.WriteString(entry.content)
 			tokens += et
 		}
+		if degraded > 0 {
+			note := fmt.Sprintf("_… %d symbol(s) shown as signature only to fit the budget; use `witc find <name>` for full detail_\n", degraded)
+			if !limited || tokens+estimateTokens(note) <= budget {
+				b.WriteString(note)
+				tokens += estimateTokens(note)
+			}
+		}
 		if omitted > 0 {
-			note := fmt.Sprintf("_… %d more symbol(s) omitted to fit the token budget_\n", omitted)
+			avail := -1
+			if limited {
+				avail = budget - tokens
+			}
+			note := omittedSymbolsNote(omitted, omittedNames, avail)
 			b.WriteString(note)
 			tokens += estimateTokens(note)
 		}
@@ -342,17 +459,97 @@ func apiSection(sum *Summary, includeInlineCalls, collapseUnexported bool, budge
 	return b.String()
 }
 
+// noteReserve is the token headroom apiSection holds back from its budget so the
+// capped closing notes always fit without the blunt tail clamp. Worst case at a
+// truncation boundary is one package's degraded + omitted-symbol notes plus the
+// omitted-packages note; each capped note is ~40 tokens, so 130 covers all three.
+const noteReserve = 130
+
+// omittedSymbolsNote reports how many symbols a package dropped and names as
+// many as fit within avail tokens, in importance order, so the reader can pull
+// any one with `witc find <name>` instead of only learning a bare count. It
+// shrinks the name list (then falls back to a bare count) so the note never
+// exceeds avail; avail < 0 means "no limit" (avail == 0 means no room). Returns
+// "" if even a bare count won't fit.
+func omittedSymbolsNote(count int, names []string, avail int) string {
+	for shown := min(len(names), 8); shown >= 1; shown-- {
+		list := strings.Join(names[:shown], ", ")
+		if remainder := count - shown; remainder > 0 {
+			list += fmt.Sprintf(", … +%d more", remainder)
+		}
+		note := fmt.Sprintf("_… %d symbol(s) omitted to fit the budget: %s — use `witc find <name>`_\n", count, list)
+		if avail < 0 || estimateTokens(note) <= avail {
+			return note
+		}
+	}
+	bare := fmt.Sprintf("_… %d more symbol(s) omitted to fit the token budget_\n", count)
+	if avail < 0 || estimateTokens(bare) <= avail {
+		return bare
+	}
+	return ""
+}
+
+// omittedPackagesNote names the packages dropped whole (their header alone would
+// not fit). It shows as many names as fit within avail tokens (up to a cap),
+// shrinking to a bare count when even one name won't fit, so the note itself
+// never pushes the surface over budget. avail < 0 means "no limit" (avail == 0
+// means no room).
+func omittedPackagesNote(names []string, avail int) string {
+	if len(names) == 0 {
+		return ""
+	}
+	for shown := min(len(names), 8); shown >= 1; shown-- {
+		list := strings.Join(names[:shown], ", ")
+		if remainder := len(names) - shown; remainder > 0 {
+			list += fmt.Sprintf(", … +%d more", remainder)
+		}
+		note := fmt.Sprintf("_… %d package(s) omitted to fit the budget: %s — use `witc summarize <pkg>` or a higher --max-tokens_\n", len(names), list)
+		if avail < 0 || estimateTokens(note) <= avail {
+			return note
+		}
+	}
+	return fmt.Sprintf("_… %d package(s) omitted to fit the budget — raise --max-tokens_\n", len(names))
+}
+
+// symbolEntry is a rendered symbol block paired with its name, so truncation can
+// report which symbols it dropped. The name is empty for summary lines (e.g. the
+// collapsed unexported-helper count) that carry no single symbol. compact is a
+// declaration-only rendering (the first line: signature + location, no doc,
+// methods, or inline calls) used to keep a symbol present when its full form
+// won't fit, before dropping it entirely.
+type symbolEntry struct {
+	name    string
+	content string
+	compact string
+}
+
+// newSymbolEntry pairs a rendered block with its name and derives the compact
+// (declaration-line-only) rendering used by the budget-degradation ladder.
+func newSymbolEntry(name, content string) symbolEntry {
+	return symbolEntry{name: name, content: content, compact: firstLine(content)}
+}
+
+// firstLine returns s up to and including its first newline, or all of s when it
+// has none. It isolates a symbol's declaration line, which every renderer emits
+// first, ahead of the doc/methods/inline-calls that follow.
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i+1]
+	}
+	return s
+}
+
 // symbolEntries renders each symbol in a package as a standalone block, ordered
 // by importance so the least useful are the first to be truncated: types, then
 // exported functions by centrality, then unexported functions by centrality.
-func symbolEntries(r *processor.Result, cg *callgraph.CallGraph, includeInlineCalls, collapseUnexported bool) []string {
-	var entries []string
+func symbolEntries(r *processor.Result, cg *callgraph.CallGraph, includeInlineCalls, collapseUnexported bool) []symbolEntry {
+	var entries []symbolEntry
 
 	for _, s := range r.Structs {
-		entries = append(entries, renderStruct(r, s, cg, includeInlineCalls))
+		entries = append(entries, newSymbolEntry(s.Name, renderStruct(r, s, cg, includeInlineCalls)))
 	}
 	for _, iface := range r.Interfaces {
-		entries = append(entries, renderInterface(r, iface))
+		entries = append(entries, newSymbolEntry(iface.Name, renderInterface(r, iface)))
 	}
 
 	var exported, unexported []processor.Function
@@ -378,17 +575,17 @@ func symbolEntries(r *processor.Result, cg *callgraph.CallGraph, includeInlineCa
 	// lower detail levels).
 	byCentrality(exported)
 	for _, fn := range exported {
-		entries = append(entries, renderFunc(r, fn, cg, includeInlineCalls))
+		entries = append(entries, newSymbolEntry(fn.Name, renderFunc(r, fn, cg, includeInlineCalls)))
 	}
 
 	if collapseUnexported {
 		if len(unexported) > 0 {
-			entries = append(entries, fmt.Sprintf("- _%d unexported helper(s) (use --detail high to expand)_\n", len(unexported)))
+			entries = append(entries, newSymbolEntry("", fmt.Sprintf("- _%d unexported helper(s) (use --detail high to expand)_\n", len(unexported))))
 		}
 	} else {
 		byCentrality(unexported)
 		for _, fn := range unexported {
-			entries = append(entries, renderFunc(r, fn, cg, includeInlineCalls))
+			entries = append(entries, newSymbolEntry(fn.Name, renderFunc(r, fn, cg, includeInlineCalls)))
 		}
 	}
 	return entries
