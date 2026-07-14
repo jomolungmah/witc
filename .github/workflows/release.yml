@@ -25,10 +25,10 @@ jobs:
           go_version: 1.25
           dest: dist
           pkg: ./cmd/witc
-          output: witc
+          prefix: witc
           buildmode: exe
           targets: linux/amd64,linux/arm64,darwin/amd64,darwin/arm64,windows/amd64
-          x_cgo: 1
+          x: 1
           ldflags: "-s -w"
 
       - name: Package artifacts
