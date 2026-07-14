@@ -18,12 +18,11 @@ builder takes over: relative imports, barrel re-exports, and tsconfig
 edges across files. Either way, npm packages are tracked as external
 dependencies.
 
-Building with `CGO_ENABLED=1` (default on most systems) enables TS/JS support
-via tree-sitter and requires a C compiler. Building with `CGO_ENABLED=0`
-produces a binary that analyzes Go only — TS/JS files are skipped. `node` is
-optional in either case and only enables the typed call-graph tier.
+`node` is optional and only enables the typed call-graph tier for TS/JS.
 
 ## Installation
+
+### Step 1 — Install the binary
 
 **Quick install** (Linux/macOS, no build tools needed):
 
@@ -31,8 +30,9 @@ optional in either case and only enables the typed call-graph tier.
 curl -sSfL https://raw.githubusercontent.com/jomolungmah/witc/main/install.sh | sh
 ```
 
-This downloads a pre-built binary with full TypeScript/JavaScript support to
-`~/.local/bin/witc`. To install to a different directory:
+This downloads a pre-built binary with full TypeScript/JavaScript support
+(built with CGO and tree-sitter) to `~/.local/bin/witc`. To install to a
+different directory:
 
 ```bash
 INSTALL_DIR=/usr/local/bin sh -c 'curl -sSfL https://raw.githubusercontent.com/jomolungmah/witc/main/install.sh | sh'
@@ -44,8 +44,9 @@ INSTALL_DIR=/usr/local/bin sh -c 'curl -sSfL https://raw.githubusercontent.com/j
 go install github.com/jomolungmah/witc/cmd/witc@latest
 ```
 
-This builds with CGO if a C compiler is available, enabling TypeScript/JavaScript
-support. For Go-only analysis (no C compiler needed):
+This builds with CGO if a C compiler (`gcc`/`clang`) is available, enabling
+TypeScript/JavaScript support via tree-sitter. For Go-only analysis (no C
+compiler needed):
 
 ```bash
 CGO_ENABLED=0 go install github.com/jomolungmah/witc/cmd/witc@latest
@@ -54,8 +55,12 @@ CGO_ENABLED=0 go install github.com/jomolungmah/witc/cmd/witc@latest
 Make sure `$(go env GOPATH)/bin` (usually `~/go/bin`) is in your `$PATH` so the
 installed binary is accessible in your shell.
 
-Then copy the skill file ([`SKILL.md`](SKILL.md), the canonical copy) to the
-agent folder of your choosing. For OpenCode:
+### Step 2 — Install the skill
+
+Copy the skill file ([`SKILL.md`](SKILL.md), the canonical copy) to the agent
+folder of your choosing so your coding assistant knows how to use witc.
+
+**OpenCode:**
 
 ```bash
 mkdir -p ~/.config/opencode/skills/witc && \
@@ -63,7 +68,7 @@ mkdir -p ~/.config/opencode/skills/witc && \
     -o ~/.config/opencode/skills/witc/SKILL.md
 ```
 
-For Claude Code:
+**Claude Code:**
 
 ```bash
 mkdir -p ~/.claude/skills/witc && \
@@ -198,10 +203,9 @@ Markdown output (at `--detail high`) contains, in order:
 The JSON format emits the same information under a documented, versioned schema
 — see [`docs/json-schema.md`](docs/json-schema.md).
 
-## Skill
+## Skill file
 
-This repository ships a skill for coding agents at
-[`.opencode/skill/witc/SKILL.md`](.opencode/skill/witc/SKILL.md) (opencode). It
+The skill at [`.opencode/skill/witc/SKILL.md`](.opencode/skill/witc/SKILL.md)
 tells an agent to run `witc summarize` to orient itself in an unfamiliar
 codebase, then prefer `witc find`/`where` for targeted lookups so it can locate
 code without loading the whole summary into context.
