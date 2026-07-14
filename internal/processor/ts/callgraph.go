@@ -1,12 +1,12 @@
+//go:build cgo
+
 package tsparser
 
 import (
 	"fmt"
-	"maps"
 	"os"
 	"path"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/jomolungmah/witc/internal/callgraph"
@@ -604,8 +604,4 @@ func hasKeyword(n *sitter.Node, kw string) bool {
 		}
 	}
 	return false
-}
-
-func sortedKeys(set map[string]bool) []string {
-	return slices.Sorted(maps.Keys(set))
 }

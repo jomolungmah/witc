@@ -16,21 +16,30 @@ c.getUser()` connects to the real method). Otherwise an import-resolving
 builder takes over: relative imports, barrel re-exports, and tsconfig
 `baseUrl`/`paths` aliases connect calls, `new` expressions, and JSX render
 edges across files. Either way, npm packages are tracked as external
-dependencies. Building from source requires a C compiler (`cgo`) for the
-tree-sitter parsers; node is optional and only enables the typed tier.
+dependencies.
+
+Building with `CGO_ENABLED=1` (default on most systems) enables TS/JS support
+via tree-sitter and requires a C compiler. Building with `CGO_ENABLED=0`
+produces a binary that analyzes Go only — TS/JS files are skipped. `node` is
+optional in either case and only enables the typed call-graph tier.
 
 ## Installation
 
 Install the binary via
 
 ```bash
-CGO_ENABLED=1 go install github.com/jomolungmah/witc/cmd/witc@latest
+go install github.com/jomolungmah/witc/cmd/witc@latest
 ```
 
-Building requires a C compiler on the PATH (the TypeScript/JavaScript parsers
-use cgo). Ensure `CGO_ENABLED=1` is set and a C compiler such as `gcc` is
-installed. Make sure `$(go env GOPATH)/bin` (usually `~/go/bin`) is in your
-`$PATH` so the installed binary is accessible in your shell.
+This builds with CGO if a C compiler is available, enabling TypeScript/JavaScript
+support. For Go-only analysis (no C compiler needed):
+
+```bash
+CGO_ENABLED=0 go install github.com/jomolungmah/witc/cmd/witc@latest
+```
+
+Make sure `$(go env GOPATH)/bin` (usually `~/go/bin`) is in your `$PATH` so the
+installed binary is accessible in your shell.
 
 Then copy the skill file ([`SKILL.md`](SKILL.md), the canonical copy) to the
 agent folder of your choosing. For OpenCode:

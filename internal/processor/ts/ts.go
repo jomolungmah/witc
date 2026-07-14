@@ -1,3 +1,5 @@
+//go:build cgo
+
 // Package tsparser implements processor.Processor for TypeScript and
 // JavaScript source files (.ts, .tsx, .js, .jsx) using tree-sitter.
 //

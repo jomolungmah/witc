@@ -2,10 +2,12 @@ package tsparser
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -235,4 +237,9 @@ func packageName(spec string) string {
 		return parts[0] + "/" + parts[1]
 	}
 	return parts[0]
+}
+
+// sortedKeys returns the keys of a bool set in sorted order.
+func sortedKeys(set map[string]bool) []string {
+	return slices.Sorted(maps.Keys(set))
 }
