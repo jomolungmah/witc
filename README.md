@@ -24,11 +24,12 @@ tree-sitter parsers; node is optional and only enables the typed tier.
 Install the binary via
 
 ```bash
-go install github.com/jomolungmah/witc/cmd/witc@latest
+CGO_ENABLED=1 go install github.com/jomolungmah/witc/cmd/witc@latest
 ```
 
 Building requires a C compiler on the PATH (the TypeScript/JavaScript parsers
-use cgo). Make sure `$(go env GOPATH)/bin` (usually `~/go/bin`) is in your
+use cgo). Ensure `CGO_ENABLED=1` is set and a C compiler such as `gcc` is
+installed. Make sure `$(go env GOPATH)/bin` (usually `~/go/bin`) is in your
 `$PATH` so the installed binary is accessible in your shell.
 
 Then copy the skill file ([`SKILL.md`](SKILL.md), the canonical copy) to the
