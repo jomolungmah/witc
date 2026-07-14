@@ -25,7 +25,20 @@ optional in either case and only enables the typed call-graph tier.
 
 ## Installation
 
-Install the binary via
+**Quick install** (Linux/macOS, no build tools needed):
+
+```bash
+curl -sSfL https://raw.githubusercontent.com/jomolungmah/witc/main/install.sh | sh
+```
+
+This downloads a pre-built binary with full TypeScript/JavaScript support to
+`~/.local/bin/witc`. To install to a different directory:
+
+```bash
+INSTALL_DIR=/usr/local/bin sh -c 'curl -sSfL https://raw.githubusercontent.com/jomolungmah/witc/main/install.sh | sh'
+```
+
+**From source** (requires Go 1.25+):
 
 ```bash
 go install github.com/jomolungmah/witc/cmd/witc@latest
