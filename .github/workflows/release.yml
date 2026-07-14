@@ -26,7 +26,6 @@ jobs:
           dest: dist
           pkg: ./cmd/witc
           prefix: witc
-          buildmode: exe
           targets: linux/amd64,linux/arm64,darwin/amd64,darwin/arm64,windows/amd64
           ldflags: "-s -w"
 
@@ -35,16 +34,15 @@ jobs:
           for target in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64 windows-amd64; do
             os="${target%%-*}"
             arch="${target##*-}"
-            BIN="witc-${{ steps.version.outputs.tag }}-${os}-${arch}"
             if [ "$os" = "windows" ]; then
-              cp "dist/${target}/witc.exe" "${BIN}.exe"
-              zip "${BIN}.zip" "${BIN}.exe"
-              rm "${BIN}.exe"
+              cp "dist/witc-${target}.exe" "witc-${{ steps.version.outputs.tag }}-${os}-${arch}.exe"
+              zip "witc-${{ steps.version.outputs.tag }}-${os}-${arch}.zip" "witc-${{ steps.version.outputs.tag }}-${os}-${arch}.exe"
+              rm "witc-${{ steps.version.outputs.tag }}-${os}-${arch}.exe"
             else
-              cp "dist/${target}/witc" "${BIN}"
-              chmod +x "${BIN}"
-              tar czf "${BIN}.tar.gz" "${BIN}"
-              rm "${BIN}"
+              cp "dist/witc-${target}" "witc-${{ steps.version.outputs.tag }}-${os}-${arch}"
+              chmod +x "witc-${{ steps.version.outputs.tag }}-${os}-${arch}"
+              tar czf "witc-${{ steps.version.outputs.tag }}-${os}-${arch}.tar.gz" "witc-${{ steps.version.outputs.tag }}-${os}-${arch}"
+              rm "witc-${{ steps.version.outputs.tag }}-${os}-${arch}"
             fi
           done
           ls -la witc-*.zip witc-*.tar.gz
